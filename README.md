@@ -3,7 +3,9 @@
 Điều khiển máy tính từ xa cho cá nhân — Windows / macOS (host), Windows / macOS / iOS / Android (điều khiển).
 Không mở port, không tự chạy server, mã hoá đầu-cuối. Phi thương mại.
 
+- Hướng dẫn sử dụng chi tiết: [docs/USER_GUIDE.md](docs/USER_GUIDE.md)
 - Kế hoạch, kiến trúc, danh sách tính năng: [docs/PLAN.md](docs/PLAN.md)
+- Tải bản cài đặt (Windows, macOS, Android APK): https://github.com/HienPhuong99/ZeroPort/releases/tag/v0.2.0
 - Controller web / PWA: https://hienphuong99.github.io/ZeroPort/
 - Trạng thái: hoàn tất M0–M5 (host Windows/macOS, controller web/PWA/desktop/Android APK, P0–P1 và các tính năng P2 không cần driver).
 
