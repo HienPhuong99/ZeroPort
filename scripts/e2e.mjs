@@ -13,7 +13,9 @@ import { join } from 'node:path'
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const procs = []
 const launch = (profile, port, ...extra) => {
-  const p = spawn(electron, ['.', `--profile=${profile}`, `--remote-debugging-port=${port}`, ...extra], { stdio: 'inherit' })
+  // ZP_BIN=release/win-unpacked/ZeroPort.exe tests the packaged app instead of the source tree.
+  const bin = process.env.ZP_BIN
+  const p = spawn(bin ?? electron, [...(bin ? [] : ['.']), `--profile=${profile}`, `--remote-debugging-port=${port}`, ...extra], { stdio: 'inherit' })
   procs.push(p)
   return attach(port)
 }
