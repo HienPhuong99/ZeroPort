@@ -17,6 +17,8 @@ interface Events {
   state(s: ConnState, detail?: string): void
   stream(s: MediaStream): void
   ctl(m: Ctl): void
+  /** The file-transfer channel of a new connection (see files.ts). */
+  file(ch: RTCDataChannel): void
 }
 
 export function connect(host: HostEntry, on: Events): Remote {
@@ -27,6 +29,7 @@ export function connect(host: HostEntry, on: Events): Remote {
   let retry: ReturnType<typeof setTimeout> | undefined
   let pendingIce: RTCIceCandidateInit[] = []
   let nonce: { nh: Uint8Array; nc: Uint8Array } | null = null
+  let dialedAt = 0
 
   const send = async (t: SigType, body: object) => sig.send(await seal(host.keys.sig, host.hostId, host.devId, 'h', t, { sid, ...body }))
 
@@ -35,6 +38,7 @@ export function connect(host: HostEntry, on: Events): Remote {
     teardown()
     sid = b64(rand(16))
     authed = false
+    dialedAt = Date.now()
     on.state('connecting')
     void send('hello', { ts: Date.now() })
     // No offer (host offline / asleep / signaling down) or no connection: try again with backoff.
@@ -48,6 +52,14 @@ export function connect(host: HostEntry, on: Events): Remote {
     pendingIce = []
     nonce = null
   }
+
+  // Phones suspend WebRTC in the background and networks change: on return, reconnect at once instead of waiting for a timeout.
+  const wake = () => {
+    if (closed || document.visibilityState !== 'visible' || Date.now() - dialedAt < 5000) return
+    if (!authed || pc?.connectionState !== 'connected') { tries = 0; dial() }
+  }
+  document.addEventListener('visibilitychange', wake)
+  addEventListener('online', wake)
 
   const offMsg = sig.onMsg((env) => void onSignal(env).catch(console.error))
 
@@ -70,6 +82,7 @@ export function connect(host: HostEntry, on: Events): Remote {
     }
     p.ondatachannel = ({ channel }) => {
       if (channel.label === 'mv') mv = channel
+      if (channel.label === 'file') on.file(channel)
       if (channel.label !== 'ctl') return
       ctl = channel
       channel.onmessage = (e) => void onCtl(JSON.parse(e.data)).catch(console.error)
@@ -110,6 +123,8 @@ export function connect(host: HostEntry, on: Events): Remote {
     closed = true
     if (sid) void send('bye', {})
     offMsg()
+    document.removeEventListener('visibilitychange', wake)
+    removeEventListener('online', wake)
     teardown()
     on.state('closed')
   }

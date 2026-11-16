@@ -97,6 +97,9 @@ export type Input =
   | { t: 'k'; c: string; d: 0 | 1 }            // physical key by KeyboardEvent.code
   | { t: 'tx'; s: string; bs?: number }        // Unicode text, preceded by `bs` backspaces
 
+/** Clipboard text larger than this is not synced (one data-channel message must stay well under 256 KB). */
+export const CLIP_MAX = 60_000
+
 export const INPUT_TYPES = new Set(['mm', 'mr', 'mb', 'mw', 'k', 'tx'])
 export type Ctl = { t: string; [k: string]: any }
 

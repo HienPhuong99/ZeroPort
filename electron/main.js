@@ -1,8 +1,8 @@
 // Electron main process: window + tray, screen-capture source selection, input injection, encrypted config.
 // The renderer (src/) does all networking and WebRTC; this process only does what a web page cannot.
-import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, session, desktopCapturer, screen, safeStorage, powerSaveBlocker } from 'electron'
-import { readFile, writeFile, rename } from 'node:fs/promises'
-import { join, dirname } from 'node:path'
+import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, session, desktopCapturer, screen, safeStorage, powerSaveBlocker, powerMonitor, clipboard, dialog } from 'electron'
+import { readFile, writeFile, rename, mkdir, open, unlink, stat } from 'node:fs/promises'
+import { join, dirname, basename, parse } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import os from 'node:os'
 import { inject } from './input.js'
@@ -64,6 +64,9 @@ function start() {
   powerSaveBlocker.start('prevent-app-suspension') // a sleeping host is an unreachable host
   screen.on('display-metrics-changed', () => { rect = null })
   screen.on('display-removed', () => { rect = null })
+  // The lock screen lives on a desktop this process cannot capture or control; tell viewers why the picture froze.
+  powerMonitor.on('lock-screen', () => win.webContents.send('locked', true))
+  powerMonitor.on('unlock-screen', () => win.webContents.send('locked', false))
 }
 
 // Bounds of the shared display in the units the OS input APIs want (see electron/input.js).
@@ -123,3 +126,53 @@ ipcMain.handle('cfg:set', async (e, cfg) => {
   await writeFile(tmp, await enc(JSON.stringify(cfg)))
   await rename(tmp, cfgFile()) // atomic: a crash mid-write cannot corrupt the pairings
 })
+
+// ---- clipboard --------------------------------------------------------------------------------
+ipcMain.handle('clip:read', (e) => (mine(e) ? clipboard.readText() : ''))
+ipcMain.on('clip:write', (e, text) => { if (mine(e)) clipboard.writeText(String(text)) })
+
+// ---- file transfer ----------------------------------------------------------------------------
+// Incoming files land in Downloads/ZeroPort. Outgoing files are only ones picked in the native dialog on this screen.
+const incoming = new Map(), outgoing = new Map()
+let nextId = 0
+
+ipcMain.handle('file:open', async (e, name) => {
+  if (!mine(e)) return
+  const dirOut = join(app.getPath('downloads'), 'ZeroPort')
+  await mkdir(dirOut, { recursive: true })
+  const { name: stem, ext } = parse(basename(String(name).replace(/[<>:"|?*\x00-\x1f]/g, '_')) || 'file')
+  for (let i = 0; ; i++) { // never overwrite: "a.txt", "a (1).txt", ...
+    const path = join(dirOut, `${stem}${i ? ` (${i})` : ''}${ext}`)
+    try { incoming.set(++nextId, { fh: await open(path, 'wx'), path }); return nextId } catch (err) { if (err.code !== 'EEXIST') throw err }
+  }
+})
+ipcMain.handle('file:write', async (e, id, chunk) => { if (mine(e)) await incoming.get(id).fh.write(Buffer.from(chunk)) })
+ipcMain.handle('file:close', async (e, id, ok) => {
+  const f = incoming.get(id)
+  if (!mine(e) || !f) return
+  incoming.delete(id)
+  await f.fh.close()
+  if (!ok) await unlink(f.path).catch(() => {}) // half a file is worse than none
+  return f.path
+})
+ipcMain.handle('file:pick', async (e) => {
+  if (!mine(e)) return []
+  const { filePaths } = await dialog.showOpenDialog({ title: 'ZeroPort — chọn tệp để gửi', properties: ['openFile', 'multiSelections'] })
+  return Promise.all(filePaths.map(async (path) => {
+    const id = ++nextId
+    outgoing.set(id, await open(path, 'r'))
+    return { id, name: basename(path), size: (await stat(path)).size }
+  }))
+})
+ipcMain.handle('file:read', async (e, id, offset, length) => {
+  if (!mine(e)) return
+  const buf = Buffer.alloc(length)
+  const { bytesRead } = await outgoing.get(id).read(buf, 0, length, offset)
+  return buf.subarray(0, bytesRead)
+})
+ipcMain.handle('file:done', async (e, id) => { if (mine(e)) { await outgoing.get(id)?.close(); outgoing.delete(id) } })
+
+// ---- settings ---------------------------------------------------------------------------------
+// Only meaningful for the installed app: in development this would register electron.exe itself.
+ipcMain.handle('autostart:get', () => app.isPackaged && app.getLoginItemSettings({ args: ['--hidden'] }).openAtLogin)
+ipcMain.handle('autostart:set', (e, on) => { if (mine(e) && app.isPackaged) app.setLoginItemSettings({ openAtLogin: !!on, args: ['--hidden'] }) })

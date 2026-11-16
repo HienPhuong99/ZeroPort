@@ -5,6 +5,10 @@ import { spawn } from 'node:child_process'
 import assert from 'node:assert/strict'
 import electron from 'electron'
 import koffi from 'koffi'
+import { createHash } from 'node:crypto'
+import { readFile, unlink } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const procs = []
@@ -94,11 +98,23 @@ try {
     assert.ok(Math.abs(gx - fx) < 0.01 && Math.abs(gy - fy) < 0.01, 'cursor did not follow')
   }
 
-  await ctl(`document.querySelector('[data-a=stats]').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))`)
+  // upload a 3 MB file through the UI's file input; it must arrive byte-identical in Downloads/ZeroPort
+  const name = `zp-e2e-${Date.now()}.bin`
+  const sent = await ctl(`(async () => { const b = new Uint8Array(3 * 1024 * 1024 + 123); for (let i = 0; i < b.length; i += 65536) crypto.getRandomValues(b.subarray(i, i + 65536));
+    const dt = new DataTransfer(); dt.items.add(new File([b], ${JSON.stringify(name)})); const p = document.querySelector('#pick'); p.files = dt.files; p.dispatchEvent(new Event('change'));
+    return [...new Uint8Array(await crypto.subtle.digest('SHA-256', b))].map(x => x.toString(16).padStart(2, '0')).join('') })()`)
+  await ctl.until(`document.querySelector('#note')?.textContent.includes('đã tới máy chủ')`, 'upload to be acknowledged')
+  const saved = join(homedir(), 'Downloads', 'ZeroPort', name)
+  const got = createHash('sha256').update(await readFile(saved)).digest('hex')
+  await unlink(saved)
+  assert.equal(got, sent, 'uploaded file differs')
+  console.log('file upload ok, sha256', got.slice(0, 16))
+
+  await ctl(`document.querySelector('[data-a=stats]').click()`)
   console.log('stats:', (await ctl.until(`document.querySelector('#stats').textContent`, 'stats', 8000)).replace('\n', ' | '))
   console.log('host panel:', await host(`document.querySelector('#app').innerText.split('\\n').filter(l => l.includes('điều khiển bởi')).join()`))
 
-  await ctl(`document.querySelector('[data-a=close]').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))`)
+  await ctl(`document.querySelector('[data-a=close]').click()`)
   await host.until(`!document.querySelector('#app').innerText.includes('điều khiển bởi')`, 'host to see the session end', 20_000)
   console.log('E2E OK')
 } finally {

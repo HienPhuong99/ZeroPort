@@ -4,7 +4,7 @@ import qrcode from 'qrcode-generator'
 import { link } from './signal'
 import { deriveKeys, parsePairing } from './proto'
 import { listHosts, removeHost, saveHost, type HostEntry } from './store'
-import { activeSessions, hostCfg, hostStats, isHost, newPairing, revoke, startHost } from './host'
+import { activeSessions, hostCfg, hostStats, isHost, newPairing, revoke, startHost, updateSettings } from './host'
 import { openSession } from './view'
 
 const app = document.getElementById('app')!
@@ -67,6 +67,7 @@ async function render() {
         <span class="dot on"></span>
         <div class="grow"><div class="name">${esc(cfg.name)}</div>
           <div class="sub">${busy.length ? `Đang được điều khiển bởi ${esc(busy.join(', '))}` : 'Sẵn sàng nhận kết nối'}</div></div>
+        <button data-act="settings" title="Cài đặt">⚙</button>
         <button class="primary" data-act="pair">Ghép thiết bị mới</button>
       </div>
       ${cfg.devices.map((d) => `
@@ -106,11 +107,35 @@ app.addEventListener('click', async (e) => {
     if (confirm(`Xoá “${host.name}” khỏi danh sách? Muốn kết nối lại phải ghép cặp lại.`)) { await removeHost(host.hostId); await render() }
   } else if (act === 'revoke' && devId) {
     if (confirm('Thu hồi quyền của thiết bị này? Nó sẽ bị ngắt và không kết nối lại được.')) await revoke(devId)
-  } else if (act === 'pair') {
+  } else if (act === 'settings') await showSettings()
+  else if (act === 'pair') {
     const name = await ask('Tên thiết bị sẽ điều khiển máy này', `Thiết bị ${hostCfg().devices.length + 1}`)
     if (name) showPairing(await newPairing(name))
   }
 })
+
+async function showSettings() {
+  const zp = (window as any).zp, cfg = hostCfg()
+  const dlg = document.getElementById('dlg') as HTMLDialogElement
+  dlg.innerHTML = `<form method="dialog"><strong>Cài đặt máy này</strong>
+    <label>Tên máy<input type="text" name="name" value="${esc(cfg.name)}" autocomplete="off"></label>
+    <label class="check"><input type="checkbox" name="auto" ${(await zp.autostartGet()) ? 'checked' : ''}> Tự chạy khi đăng nhập (ẩn ở khay hệ thống)</label>
+    <label>Máy chủ TURN/STUN — JSON, để trống dùng mặc định. Chỉ cần khi mạng không nối trực tiếp được.
+      <textarea name="ice" rows="4" spellcheck="false" placeholder='[{"urls":"turn:…","username":"…","credential":"…"}]'>${esc(cfg.iceServers ? JSON.stringify(cfg.iceServers) : '')}</textarea></label>
+    <div class="row" style="justify-content:flex-end"><button type="button" id="no">Huỷ</button><button class="primary" value="ok">Lưu</button></div></form>`
+  const f = dlg.querySelector('form')!.elements as any
+  dlg.querySelector<HTMLElement>('#no')!.onclick = () => dlg.close('')
+  dlg.returnValue = ''
+  dlg.showModal()
+  dlg.addEventListener('close', async () => {
+    if (dlg.returnValue !== 'ok') return
+    try {
+      await updateSettings(f.name.value.trim(), f.ice.value)
+      await zp.autostartSet(f.auto.checked)
+      toast('Đã lưu')
+    } catch (err: any) { toast(`Không lưu được: ${err?.message ?? err}`) }
+  }, { once: true })
+}
 
 function showPairing(p: { code: string; link: string }) {
   const dlg = document.getElementById('dlg') as HTMLDialogElement

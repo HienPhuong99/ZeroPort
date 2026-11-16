@@ -72,22 +72,22 @@ Không giới hạn thiết bị, số phiên, thời gian phiên; không quản
 ### P0 — cần để làm việc hằng ngày
 | # | Tính năng | Trả phí ở | Cách làm trong ZeroPort | Trạng thái |
 |---|---|---|---|---|
-| 1 | Truy cập không cần người ngồi máy | tất cả | Ghép cặp một lần, host chạy nền ở khay hệ thống | ☐ |
-| 2 | Danh sách thiết bị + trạng thái online | UltraViewer Pro, AnyViewer, AnyDesk | Lưu cục bộ trên controller; online qua Realtime Presence | ☐ |
-| 3 | Hình ảnh chất lượng cao, tới 60fps, độ phân giải gốc/4K | AnyViewer, UltraViewer Premium, Splashtop | Chọn preset bitrate/fps, chế độ "nét chữ" / "mượt" | ☐ |
-| 4 | Âm thanh máy host | UltraViewer Pro | `getDisplayMedia` audio loopback (Windows; macOS thử nghiệm) | ☐ |
-| 5 | Chuột, phím, phím đặc biệt, gõ Unicode/tiếng Việt | — | Scancode + `KEYEVENTF_UNICODE`; mobile: bàn phím ảo + thanh phím | ☐ |
-| 6 | Đồng bộ clipboard | — | Tự động trên Electron/Chrome; nút bấm trên iOS | ☐ |
-| 7 | Truyền file hai chiều, không giới hạn dung lượng/tốc độ | AnyViewer (100MB, 500KB/s ở free), UltraViewer (1GB) | Chia khối qua data channel có backpressure | ☐ |
-| 8 | Chuyển giữa nhiều màn hình | AnyDesk, TeamViewer | `replaceTrack` không cần thương lượng lại | ☐ |
-| 9 | Chống ngủ, tự chạy khi đăng nhập, tự kết nối lại | UltraViewer Lite+ | `powerSaveBlocker`, login item, reconnect | ☐ |
-| 10 | Điều khiển từ điện thoại (trackpad, pinch-zoom, cuộn 2 ngón) | — | Pointer Events trong PWA | ☐ |
+| 1 | Truy cập không cần người ngồi máy | tất cả | Ghép cặp một lần, host chạy nền ở khay hệ thống | ☑ |
+| 2 | Danh sách thiết bị + trạng thái online | UltraViewer Pro, AnyViewer, AnyDesk | Lưu cục bộ trên controller; online qua Realtime Presence | ☑ |
+| 3 | Hình ảnh chất lượng cao, tới 60fps, độ phân giải gốc/4K | AnyViewer, UltraViewer Premium, Splashtop | Chọn preset bitrate/fps, chế độ "nét chữ" / "mượt" | ☑ |
+| 4 | Âm thanh máy host | UltraViewer Pro | `getDisplayMedia` audio loopback (Windows; macOS thử nghiệm) | ☑ |
+| 5 | Chuột, phím, phím đặc biệt, gõ Unicode/tiếng Việt | — | Scancode + `KEYEVENTF_UNICODE`; mobile: bàn phím ảo + thanh phím | ☑ |
+| 6 | Đồng bộ clipboard | — | Tự động trên Electron/Chrome; nút bấm trên iOS | ☑ |
+| 7 | Truyền file hai chiều, không giới hạn dung lượng/tốc độ | AnyViewer (100MB, 500KB/s ở free), UltraViewer (1GB) | Chia khối qua data channel có backpressure | ☑ |
+| 8 | Chuyển giữa nhiều màn hình | AnyDesk, TeamViewer | `replaceTrack` không cần thương lượng lại | ☑ |
+| 9 | Chống ngủ, tự chạy khi đăng nhập, tự kết nối lại | UltraViewer Lite+ | `powerSaveBlocker`, login item, reconnect | ☑ |
+| 10 | Điều khiển từ điện thoại (trackpad, pinch-zoom, cuộn 2 ngón) | — | Pointer Events trong PWA | ☑ |
 
 ### P1 — tiện, rẻ để làm
 | # | Tính năng | Trả phí ở | Cách làm | Trạng thái |
 |---|---|---|---|---|
-| 11 | Ghi hình phiên | UltraViewer Premium, AnyDesk, TeamViewer | `MediaRecorder` trên controller → tải .webm | ☐ |
-| 12 | Chụp ảnh màn hình | — | canvas → PNG | ☐ |
+| 11 | Ghi hình phiên | UltraViewer Premium, AnyDesk, TeamViewer | `MediaRecorder` trên controller → tải .webm | ☑ |
+| 12 | Chụp ảnh màn hình | — | canvas → PNG | ☑ |
 | 13 | Chế độ riêng tư (đen màn hình host + chặn chuột/phím tại chỗ) | AnyViewer, AnyDesk, TeamViewer | Cửa sổ đen phủ kín có `setContentProtection` (không lọt vào luồng chụp) + `BlockInput` khi elevated; chỉ Windows | ☐ |
 | 14 | Phím tắt hệ thống từ xa: khoá máy, Task Manager, khởi động lại, tắt máy | AnyViewer (free), AnyDesk | Lệnh qua data channel | ☐ |
 | 15 | Chuột game (chuột tương đối) | AnyViewer | Pointer Lock → `MOUSEEVENTF_MOVE` tương đối | ☐ |
@@ -96,7 +96,7 @@ Không giới hạn thiết bị, số phiên, thời gian phiên; không quản
 | 18 | Wake-on-LAN | UltraViewer, AnyDesk, TeamViewer | Một host khác cùng LAN gửi magic packet (`node:dgram`) | ☐ |
 | 19 | Xác thực 2 lớp (TOTP) khi kết nối | AnyDesk, AnyViewer | Kiểm tra trên host sau bước xác thực khoá thiết bị | ☐ |
 | 20 | Khoá máy khi ngắt kết nối | AnyDesk | `LockWorkStation` (tuỳ chọn; lưu ý v1 không mở khoá lại được từ xa) | ☐ |
-| 21 | Chế độ tiết kiệm băng thông | AnyViewer (đen trắng) | Preset giảm độ phân giải/fps/bitrate | ☐ |
+| 21 | Chế độ tiết kiệm băng thông | AnyViewer (đen trắng) | Preset giảm độ phân giải/fps/bitrate | ☑ |
 | 22 | Nhiều phiên cùng lúc | AnyViewer, UltraViewer Premium | Mỗi phiên một tab/cửa sổ | ☐ |
 | 23 | APK Android | — | Capacitor, build trên GitHub Actions | ☐ |
 
@@ -112,9 +112,9 @@ Màu 4:4:4 (VP9 profile 1/AV1), tường màn hình (xem nhiều máy cùng lúc
 
 ## 5. Lộ trình (mỗi mốc = commit + push)
 
-1. **M0** Kế hoạch + khung repo. ← đang ở đây
-2. **M1** Lõi: giao thức, mã hoá, signaling; host chụp màn hình + bơm input; controller xem + điều khiển; test trên máy này.
-3. **M2** P0 còn lại: clipboard, file, đa màn hình, âm thanh, preset chất lượng, UX mobile.
+1. **M0** Kế hoạch + khung repo. ✔
+2. **M1** ✔ Lõi: giao thức, mã hoá, signaling; host chụp màn hình + bơm input; controller xem + điều khiển; test trên máy này.
+3. **M2** ✔ (code xong; âm thanh, đa màn hình, cảm ứng chưa test trên thiết bị thật) P0 còn lại: clipboard, file, đa màn hình, âm thanh, preset chất lượng, UX mobile.
 4. **M3** CI: deploy controller lên GitHub Pages; build installer Windows + DMG macOS; phát hành.
 5. **M4** P1: ghi hình, chế độ riêng tư, terminal, WoL, TOTP…
 6. **M5** APK Android; review bảo mật; P2 theo nhu cầu.
