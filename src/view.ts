@@ -1,11 +1,12 @@
 // Session screen: remote video plus everything that turns local mouse / touch / keyboard into Input messages.
 import { connect, type ConnState, type Remote } from './controller'
 import { download, makeTransfer, openSink } from './files'
-import { saveHost, type HostEntry } from './store'
+import { listHosts, saveHost, type HostEntry } from './store'
 import { CLIP_MAX, type Ctl } from './proto'
 
 const root = document.getElementById('session')!
 const coarse = matchMedia('(pointer: coarse)').matches
+const esc = (s: unknown) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 
 const QUALITY: Record<string, object> = {
   'Cân bằng': { kbps: 8000, fps: 60 },
@@ -25,6 +26,15 @@ const MORE: [string, string][] = [
   ['send', 'Gửi tệp lên máy chủ'], ['pull', 'Lấy tệp từ máy chủ'],
   ['clipUp', 'Gửi clipboard → máy chủ'], ['clipDown', 'Lấy clipboard ← máy chủ'],
   ['shot', 'Chụp ảnh màn hình'], ['rec', 'Ghi hình phiên'],
+  ['privacy', 'Chế độ riêng tư'], ['power', 'Khoá / nguồn…'],
+  ['info', 'Thông tin hệ thống'], ['term', 'Terminal'],
+  ...(coarse ? [] : [['game', 'Chuột game (khoá con trỏ)'] as [string, string]]), ['wol', 'Đánh thức máy khác'],
+]
+const POWER: [string, string, string][] = [
+  ['lock', 'Khoá máy', ''],
+  ['logoff', 'Đăng xuất', 'Đăng xuất khỏi máy chủ? Mọi ứng dụng đang mở sẽ bị đóng, và ZeroPort chỉ chạy lại sau khi có người đăng nhập.'],
+  ['restart', 'Khởi động lại', 'Khởi động lại máy chủ? ZeroPort chỉ kết nối lại được sau khi Windows/macOS đăng nhập xong (cần auto-logon nếu không có ai ở máy).'],
+  ['shutdown', 'Tắt máy', 'Tắt máy chủ? Sau đó chỉ bật lại được bằng tay hoặc Wake-on-LAN.'],
 ]
 const stamp = () => new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
 
@@ -49,10 +59,16 @@ export function openSession(host: HostEntry, onClose: () => void) {
     <div id="stats" hidden></div>
     <div id="note" hidden></div>
     <input type="file" id="pick" multiple hidden>
+    <dialog id="panel"></dialog>
+    <dialog id="otpdlg"><form><strong>Mã xác thực 2 lớp</strong>
+      <div class="sub" id="otpmsg">Mở ứng dụng xác thực (Google Authenticator, …) và nhập mã 6 số của ZeroPort.</div>
+      <input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="\\d{6}" required style="margin:12px 0">
+      <div class="row" style="justify-content:flex-end"><button type="button" id="otpno">Huỷ</button><button class="primary">Xác nhận</button></div></form></dialog>
     <textarea id="kb" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false"></textarea>`
   const $ = <T extends HTMLElement>(s: string) => root.querySelector<T>(s)!
   const stage = $('#stage'), video = $<HTMLVideoElement>('video'), veil = $('#veil'), veilMsg = $('#veil-msg')
   const bar = $('#bar'), menu = $('#menu'), stats = $('#stats'), note = $('#note'), kb = $<HTMLTextAreaElement>('#kb'), pick = $<HTMLInputElement>('#pick')
+  const panel = $<HTMLDialogElement>('#panel'), otpDlg = $<HTMLDialogElement>('#otpdlg')
   veil.querySelector('strong')!.textContent = host.name
   const ac = new AbortController(), sig = { signal: ac.signal }
   let displays: { id: string; label: string }[] = [], display = ''
@@ -60,6 +76,7 @@ export function openSession(host: HostEntry, onClose: () => void) {
   let conn: ConnState = 'connecting', connDetail = '', hostLocked = false
   let files: ReturnType<typeof makeTransfer> | null = null
   let clipLast = '', clipRemote = ''
+  let privacyOn = false, platform = ''
 
   let noteTimer = 0
   function say(text: string, ms = 4000) {
@@ -73,8 +90,22 @@ export function openSession(host: HostEntry, onClose: () => void) {
     veil.hidden = conn === 'connected' && !hostLocked
     veilMsg.textContent = lockedNow
       ? 'Máy chủ đang ở màn hình khoá. Bản này chưa điều khiển được màn hình khoá — cần mở khoá tại máy.'
-      : connDetail || { connecting: 'Đang kết nối…', offline: 'Máy chủ không phản hồi — đang thử lại…', connected: '', rejected: 'Bị từ chối', closed: '' }[conn]
+      : connDetail && conn !== 'otp' ? connDetail : { connecting: 'Đang kết nối…', offline: 'Máy chủ không phản hồi — đang thử lại…', connected: '', rejected: 'Bị từ chối', closed: '', otp: 'Chờ mã xác thực 2 lớp…' }[conn]
+    if (conn === 'otp') {
+      $('#otpmsg').textContent = connDetail || 'Mở ứng dụng xác thực (Google Authenticator, …) và nhập mã 6 số của ZeroPort.'
+      const input = otpDlg.querySelector('input')!
+      input.value = ''
+      if (!otpDlg.open) otpDlg.show()
+      input.focus()
+    } else if (otpDlg.open) otpDlg.close()
   }
+  otpDlg.querySelector('form')!.addEventListener('submit', (e) => {
+    e.preventDefault()
+    const input = otpDlg.querySelector('input')!
+    remote.otp(input.value.trim())
+    $('#otpmsg').textContent = 'Đang kiểm tra…'
+  }, sig)
+  $('#otpno').addEventListener('click', () => close(), sig)
 
   const remote: Remote = connect(host, {
     state(s, detail) { conn = s; connDetail = detail ?? ''; paintVeil() },
@@ -89,11 +120,22 @@ export function openSession(host: HostEntry, onClose: () => void) {
       if (m.t === 'state') {
         if (m.displays) { displays = m.displays; display = m.display; $('[data-a=screen]').hidden = displays.length < 2 }
         if (typeof m.locked === 'boolean') { hostLocked = m.locked; paintVeil() }
+        if (typeof m.platform === 'string') platform = m.platform
+        if (typeof m.privacy === 'boolean' && m.privacy !== privacyOn) {
+          privacyOn = m.privacy
+          say(!privacyOn ? 'Đã tắt chế độ riêng tư'
+            : m.blocked ? 'Chế độ riêng tư: màn hình máy chủ đen, chuột/phím tại chỗ bị chặn'
+            : `Chế độ riêng tư: màn hình máy chủ đen${platform === 'win32' ? '. Chuột/phím tại chỗ vẫn dùng được — muốn chặn phải chạy ZeroPort bằng quyền admin' : ''}`, 7000)
+        }
+        if (Array.isArray(m.macs) && m.macs.join() !== (host.macs ?? []).join()) void saveHost({ ...host, macs: (host.macs = m.macs.map(String)) })
         if (m.name && host.name === 'Máy mới') void saveHost({ ...host, name: (host.name = m.name) })
       } else if (m.t === 'clip') {
         clipLast = clipRemote = String(m.s)
         navigator.clipboard?.writeText(clipRemote).catch(() => {}) // needs focus (and a tap on iOS): "Lấy clipboard" is the manual path
       } else if (m.t === 'xfer' && m.dir === 'up' && m.done >= m.size) say(`✓ ${m.name} đã tới máy chủ (Downloads/ZeroPort)`)
+      else if (m.t === 'note') say(String(m.s))
+      else if (m.t === 'sysinfo') showInfo(m)
+      else if (m.t === 'term') termOut(m)
     },
   })
   paintVeil()
@@ -131,13 +173,37 @@ export function openSession(host: HostEntry, onClose: () => void) {
   }
   const click = (b: 0 | 1 | 2) => { remote.send({ t: 'mb', b, d: 1 }); remote.send({ t: 'mb', b, d: 0 }) }
 
-  // ---- mouse / pen: direct ------------------------------------------------------------------------
-  stage.addEventListener('pointermove', (e) => { if (e.pointerType !== 'touch') { const p = norm(e); moveTo(p.x, p.y) } }, sig)
+  // ---- mouse / pen: direct, or relative while the pointer is locked (game mouse) -------------------
+  let game = false, acc = { x: 0, y: 0 }, accFrame = 0
+  const flushRel = () => {
+    accFrame = 0
+    const dx = Math.trunc(acc.x), dy = Math.trunc(acc.y)
+    acc.x -= dx; acc.y -= dy
+    if (dx || dy) remote.send({ t: 'mr', dx, dy }) // reliable: a lost delta would drift the aim
+  }
+  document.addEventListener('pointerlockchange', () => {
+    const on = document.pointerLockElement === stage
+    if (on !== game) say((game = on) ? 'Chuột game: bật — Esc để thoát' : 'Chuột game: tắt')
+  }, sig)
+  function toggleGame() {
+    if (document.pointerLockElement) return document.exitPointerLock()
+    // Raw (unaccelerated) deltas where supported; the host OS applies its own pointer speed.
+    const p = (stage.requestPointerLock as any)({ unadjustedMovement: true })
+    p?.catch?.(() => stage.requestPointerLock())
+  }
+  stage.addEventListener('pointermove', (e) => {
+    if (e.pointerType === 'touch') return
+    if (game) {
+      acc.x += e.movementX; acc.y += e.movementY
+      accFrame ||= requestAnimationFrame(flushRel)
+      return
+    }
+    const p = norm(e); moveTo(p.x, p.y)
+  }, sig)
   stage.addEventListener('pointerdown', (e) => {
     if (e.pointerType === 'touch') return touchDown(e)
     stage.setPointerCapture(e.pointerId)
-    const p = norm(e)
-    remote.send({ t: 'mm', x: p.x, y: p.y }) // reliable channel, so the click cannot outrun the move
+    if (!game) { const p = norm(e); remote.send({ t: 'mm', x: p.x, y: p.y }) } // reliable channel, so the click cannot outrun the move
     if (e.button <= 2) remote.send({ t: 'mb', b: e.button as 0 | 1 | 2, d: 1 })
   }, sig)
   stage.addEventListener('pointerup', (e) => {
@@ -233,7 +299,7 @@ export function openSession(host: HostEntry, onClose: () => void) {
   let gate: Promise<unknown> = Promise.resolve() // keeps key order when a paste first has to sync the clipboard
   function onKey(e: KeyboardEvent, d: 0 | 1) {
     // 229 / isComposing = soft keyboard or IME: that text arrives through the textarea below instead.
-    if (e.isComposing || e.keyCode === 229 || !e.code || (e.target as HTMLElement).closest?.('dialog')) return
+    if (e.isComposing || e.keyCode === 229 || !e.code || panel.open || otpDlg.open || (e.target as HTMLElement).closest?.('dialog')) return
     e.preventDefault()
     const paste = d && e.code === 'KeyV' && (e.ctrlKey || e.metaKey) && !e.repeat
     const code = e.code
@@ -289,6 +355,111 @@ export function openSession(host: HostEntry, onClose: () => void) {
     say('● Đang ghi hình — vào Thêm → Dừng ghi để lưu')
   }
 
+  // ---- M4 panels: power, sysinfo, terminal, Wake-on-LAN -------------------------------------------
+  let termActive = false
+  panel.addEventListener('close', () => {
+    if (termActive) { termActive = false; remote.send({ t: 'term', close: true }) }
+  }, sig)
+
+  function showPower() {
+    panel.innerHTML = `<strong>Khoá / nguồn máy chủ</strong><div class="plist">
+      ${POWER.map(([cmd, label]) => `<button data-p="${cmd}" class="${cmd === 'shutdown' || cmd === 'restart' ? 'danger' : ''}">${label}</button>`).join('')}
+    </div><div class="row" style="justify-content:flex-end;margin-top:12px"><button id="pclose">Đóng</button></div>`
+    panel.querySelector('#pclose')!.addEventListener('click', () => panel.close())
+    panel.querySelectorAll<HTMLElement>('[data-p]').forEach((b) => {
+      b.onclick = () => {
+        const [, , ask] = POWER.find(([c]) => c === b.dataset.p)!
+        if (ask && !confirm(ask)) return
+        remote.send({ t: 'power', cmd: b.dataset.p })
+        panel.close()
+      }
+    })
+    panel.showModal()
+  }
+
+  const fmtBytes = (b: number) => `${(b / (1024 ** 3)).toFixed(1)} GB`
+  const fmtUp = (s: number) => {
+    const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60)
+    return `${d ? `${d}d ` : ''}${h}h ${m}m`
+  }
+  function showInfo(m: Ctl) {
+    const procs = (m.procs as { pid: number; name: string; mb: number }[] | undefined) ?? []
+    panel.innerHTML = `<strong>Thông tin hệ thống — ${esc(m.host)}</strong>
+      <div class="sysgrid">
+        <span>Người dùng</span><span>${esc(m.user)}</span>
+        <span>Hệ điều hành</span><span>${esc(m.os)}</span>
+        <span>CPU</span><span>${esc(m.cpu)}</span>
+        <span>RAM</span><span>${fmtBytes(m.memUsed)} / ${fmtBytes(m.memTotal)}</span>
+        <span>Thời gian bật</span><span>${fmtUp(m.uptime)}</span>
+      </div>
+      <div class="proclist"><table><thead><tr><th>Tiến trình</th><th>PID</th><th>RAM</th><th></th></tr></thead><tbody>
+        ${procs.map((p) => `<tr><td>${esc(p.name)}</td><td>${p.pid}</td><td>${p.mb} MB</td><td><button data-kill="${p.pid}" class="danger sm">Dừng</button></td></tr>`).join('')}
+      </tbody></table></div>
+      <div class="row" style="justify-content:flex-end;margin-top:12px">
+        <button id="iref">Làm mới</button><button class="primary" id="iclose">Đóng</button>
+      </div>`
+    panel.querySelector('#iref')!.addEventListener('click', () => remote.send({ t: 'sysinfo' }))
+    panel.querySelector('#iclose')!.addEventListener('click', () => panel.close())
+    panel.querySelectorAll<HTMLElement>('[data-kill]').forEach((b) => {
+      b.onclick = () => { if (confirm(`Kết thúc tiến trình PID ${b.dataset.kill}?`)) remote.send({ t: 'kill', pid: +b.dataset.kill! }) }
+    })
+    if (!panel.open) panel.showModal()
+  }
+
+  function openTerm() {
+    termActive = true
+    panel.innerHTML = `<strong>Terminal — ${esc(host.name)}</strong>
+      <pre id="term-out"></pre>
+      <form id="term-in" class="row">
+        <input type="text" name="cmd" placeholder="Nhập lệnh rồi Enter…" autocomplete="off" spellcheck="false">
+        <button class="primary">Gửi</button><button type="button" id="tbrk" title="Ctrl+C">^C</button><button type="button" id="tclose">Đóng</button>
+      </form>`
+    const inp = panel.querySelector<HTMLInputElement>('input')!
+    panel.querySelector('#tclose')!.addEventListener('click', () => panel.close())
+    panel.querySelector('#tbrk')!.addEventListener('click', () => { remote.send({ t: 'term', s: '\x03' }); inp.focus() })
+    panel.querySelector('#term-in')!.addEventListener('submit', (e) => {
+      e.preventDefault()
+      const s = inp.value
+      inp.value = ''
+      remote.send({ t: 'term', s: s + (platform === 'win32' ? '\r\n' : '\n') })
+    })
+    panel.showModal()
+    inp.focus()
+    remote.send({ t: 'term', open: true })
+  }
+  function termOut(m: Ctl) {
+    const pre = panel.querySelector<HTMLElement>('#term-out')
+    if (!pre) return
+    if (m.s) pre.textContent = (pre.textContent + String(m.s)).slice(-100_000)
+    if ('exit' in m) pre.textContent += `\n[Tiến trình đã thoát: ${m.exit}]\n`
+    pre.scrollTop = pre.scrollHeight
+  }
+
+  async function showWol() {
+    const others = (await listHosts()).filter((h) => h.hostId !== host.hostId && h.macs?.length)
+    panel.innerHTML = `<strong>Đánh thức máy khác (Wake-on-LAN)</strong>
+      <div class="sub" style="margin:6px 0 12px">Nhờ <b>${esc(host.name)}</b> gửi gói đánh thức vào mạng LAN của nó.</div>
+      ${others.map((h) => `<button data-w="${esc(h.macs!.join(','))}" class="witem"><span>${esc(h.name)}</span><span class="sub">${esc(h.macs![0])}</span></button>`).join('')
+        || '<div class="sub" style="margin-bottom:10px">Chưa có máy nào khác lưu địa chỉ MAC (hãy kết nối tới máy đó ít nhất 1 lần).</div>'}
+      <form id="wform" class="row" style="margin-top:10px">
+        <input type="text" name="mac" placeholder="Hoặc nhập MAC: aa:bb:cc:dd:ee:ff" autocomplete="off" spellcheck="false">
+        <button class="primary">Đánh thức</button>
+      </form>
+      <div class="row" style="justify-content:flex-end;margin-top:12px"><button id="wclose">Đóng</button></div>`
+    panel.querySelector('#wclose')!.addEventListener('click', () => panel.close())
+    panel.querySelectorAll<HTMLElement>('[data-w]').forEach((b) => {
+      b.onclick = () => { remote.send({ t: 'wol', macs: b.dataset.w!.split(',') }); panel.close() }
+    })
+    panel.querySelector('#wform')!.addEventListener('submit', (e) => {
+      e.preventDefault()
+      const mac = panel.querySelector<HTMLInputElement>('input')!.value.trim()
+      if (!mac) return
+      remote.send({ t: 'wol', macs: [mac] })
+      panel.close()
+    })
+    panel.showModal()
+  }
+
   // ---- toolbar ------------------------------------------------------------------------------------
   const paintMods = () => menu.querySelectorAll<HTMLElement>('[data-mod]').forEach((b) => b.classList.toggle('on', sticky.has(b.dataset.mod!)))
   function showMenu(kind: string) {
@@ -302,7 +473,10 @@ export function openSession(host: HostEntry, onClose: () => void) {
       paintMods()
     } else if (kind === 'quality') menu.innerHTML = Object.keys(QUALITY).map((q) => `<button data-q="${q}">${q}</button>`).join('')
     else if (kind === 'screen') menu.innerHTML = displays.map((d) => `<button data-d="${d.id}" class="${d.id === display ? 'on' : ''}">${d.label}</button>`).join('')
-    else if (kind === 'more') menu.innerHTML = MORE.map(([a, l]) => `<button data-m="${a}" class="span2">${a === 'rec' && rec ? 'Dừng ghi' : l}</button>`).join('')
+    else if (kind === 'more') menu.innerHTML = MORE.map(([a, l]) => {
+      const label = a === 'rec' && rec ? 'Dừng ghi' : a === 'privacy' && privacyOn ? 'Tắt chế độ riêng tư' : a === 'game' && game ? 'Tắt chuột game' : l
+      return `<button data-m="${a}" class="span2">${label}</button>`
+    }).join('')
   }
   // preventDefault on pointerdown keeps focus (and the soft keyboard) where it is; the action runs on click,
   // which — unlike a touch pointerdown — counts as a user gesture for clipboard, file picker and fullscreen.
@@ -326,6 +500,12 @@ export function openSession(host: HostEntry, onClose: () => void) {
     else if (b.dataset.m === 'clipDown') navigator.clipboard.writeText(clipRemote).then(() => say(clipRemote ? 'Đã chép clipboard của máy chủ' : 'Máy chủ chưa chép gì'), () => say('Trình duyệt không cho ghi clipboard'))
     else if (b.dataset.m === 'shot') screenshot()
     else if (b.dataset.m === 'rec') toggleRec()
+    else if (b.dataset.m === 'privacy') remote.send({ t: 'privacy', on: !privacyOn })
+    else if (b.dataset.m === 'power') showPower()
+    else if (b.dataset.m === 'info') { remote.send({ t: 'sysinfo' }); say('Đang lấy thông tin…', 2000) }
+    else if (b.dataset.m === 'term') openTerm()
+    else if (b.dataset.m === 'game') toggleGame()
+    else if (b.dataset.m === 'wol') void showWol()
   }, sig)
   bar.addEventListener('click', (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>('button')
@@ -372,6 +552,10 @@ export function openSession(host: HostEntry, onClose: () => void) {
   function close() {
     releaseAll()
     rec?.stop()
+    if (accFrame) cancelAnimationFrame(accFrame)
+    if (document.pointerLockElement) document.exitPointerLock()
+    if (panel.open) panel.close()
+    if (otpDlg.open) otpDlg.close()
     clearInterval(tick)
     ac.abort()
     remote.close()

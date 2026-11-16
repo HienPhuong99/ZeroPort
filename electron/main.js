@@ -3,9 +3,10 @@
 import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, session, desktopCapturer, screen, safeStorage, powerSaveBlocker, powerMonitor, clipboard, dialog } from 'electron'
 import { readFile, writeFile, rename, mkdir, open, unlink, stat } from 'node:fs/promises'
 import { join, dirname, basename, parse } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import os from 'node:os'
 import { inject } from './input.js'
+import * as sys from './system.js'
 
 const dir = dirname(fileURLToPath(import.meta.url))
 const dev = process.argv.includes('--dev')
@@ -20,7 +21,7 @@ if (!app.requestSingleInstanceLock()) app.quit()
 else app.whenReady().then(start)
 
 app.on('second-instance', () => { win?.show(); win?.focus() })
-app.on('before-quit', () => { quitting = true })
+app.on('before-quit', () => { quitting = true; sys.privacy(false); sys.termCloseAll() })
 app.on('window-all-closed', () => {}) // keep serving from the tray
 
 function start() {
@@ -31,10 +32,24 @@ function start() {
     // The host keeps capturing and signaling while the window is hidden.
     webPreferences: { preload: join(dir, 'preload.cjs'), backgroundThrottling: false },
   })
-  if (dev) win.loadURL('http://localhost:5173')
+  const baseUrl = dev ? 'http://localhost:5173/' : pathToFileURL(join(dir, '../dist/index.html')).href
+  if (dev) win.loadURL(baseUrl)
   else win.loadFile(join(dir, '../dist/index.html'))
   win.on('close', (e) => { if (!quitting) { e.preventDefault(); win.hide() } })
-  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (!url.startsWith(baseUrl + '#c=')) return { action: 'deny' }
+    return {
+      action: 'allow',
+      overrideBrowserWindowOptions: {
+        width: 1120, height: 740, backgroundColor: '#0b0f17', autoHideMenuBar: true,
+        icon: join(dir, 'icon.png'), webPreferences: { backgroundThrottling: false },
+      },
+    }
+  })
+  win.webContents.on('did-create-window', (child) => {
+    child.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    child.webContents.on('will-navigate', (e) => e.preventDefault())
+  })
   win.webContents.on('will-navigate', (e) => e.preventDefault()) // local UI only, never remote content
 
   tray = new Tray(nativeImage.createFromPath(join(dir, 'icon.png')).resize({ width: 16, height: 16 }))
@@ -47,8 +62,9 @@ function start() {
   tray.on('click', () => win.show())
 
   const ses = session.defaultSession
-  const allowed = new Set(['media', 'display-capture', 'clipboard-read', 'clipboard-sanitized-write', 'fullscreen', 'pointerLock', 'keyboardLock'])
-  ses.setPermissionRequestHandler((wc, perm, cb) => cb(wc === win.webContents && allowed.has(perm)))
+  const hostPerms = new Set(['media', 'display-capture'])
+  const ctlPerms = new Set(['clipboard-read', 'clipboard-sanitized-write', 'fullscreen', 'pointerLock', 'keyboardLock'])
+  ses.setPermissionRequestHandler((wc, perm, cb) => cb(ctlPerms.has(perm) || (wc === win.webContents && hostPerms.has(perm))))
   // getDisplayMedia() in the renderer lands here: hand over the selected screen, no picker.
   ses.setDisplayMediaRequestHandler(async (req, cb) => {
     try {
@@ -171,6 +187,18 @@ ipcMain.handle('file:read', async (e, id, offset, length) => {
   return buf.subarray(0, bytesRead)
 })
 ipcMain.handle('file:done', async (e, id) => { if (mine(e)) { await outgoing.get(id)?.close(); outgoing.delete(id) } })
+
+// ---- M4: power, system info, privacy, shell, Wake-on-LAN (electron/system.js) ------------------
+const guard = (fn) => (e, ...a) => { if (!mine(e)) throw new Error('denied'); return fn(...a) }
+ipcMain.handle('sys:power', guard((cmd) => sys.power(String(cmd))))
+ipcMain.handle('sys:info', guard(() => sys.sysInfo()))
+ipcMain.handle('sys:kill', guard((pid) => sys.kill(pid)))
+ipcMain.handle('sys:privacy', guard((on) => sys.privacy(!!on)))
+ipcMain.handle('sys:macs', guard(() => sys.macs()))
+ipcMain.handle('sys:wake', guard((list) => sys.wake(list)))
+ipcMain.handle('term:open', guard((id) => sys.termOpen(String(id), (kind, data) => win?.webContents.send('term', String(id), kind, data))))
+ipcMain.on('term:write', (e, id, s) => { if (mine(e)) sys.termWrite(String(id), s) })
+ipcMain.on('term:close', (e, id) => { if (mine(e)) sys.termClose(String(id)) })
 
 // ---- settings ---------------------------------------------------------------------------------
 // Only meaningful for the installed app: in development this would register electron.exe itself.

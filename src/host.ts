@@ -2,18 +2,28 @@
 // Flow and threat model: docs/PLAN.md §2.
 import { link, supa, type Link } from './signal'
 import { makeTransfer, openSink } from './files'
+import { base32, otpauthUri, verifyTotp } from './totp'
 import {
   authMac, authVerify, b64, CLIP_MAX, deriveKeys, fingerprint, INPUT_TYPES, open, pairingCode, pairingLink, rand, seal, STUN, unb64,
   type Ctl, type Envelope, type Input, type Keys, type SigType,
 } from './proto'
 
 export interface Device { devId: string; name: string; secret: string; added: number; seen?: number }
-export interface HostCfg { hostId: string; name: string; devices: Device[]; iceServers?: RTCIceServer[] }
+export interface HostCfg {
+  hostId: string; name: string; devices: Device[]; iceServers?: RTCIceServer[]
+  /** Second factor: base32 secret and the last accepted time step (replay guard). */
+  totp?: { secret: string; last: number }
+  /** Lock the workstation when the last viewer leaves. */
+  lockOnEnd?: boolean
+}
 
 interface Session {
   sid: string; dev: Device; keys: Keys; pc: RTCPeerConnection; ctl: RTCDataChannel
   nh: Uint8Array; authed: boolean; held: Set<string>; timer?: ReturnType<typeof setTimeout>
   video: RTCRtpSender; audio: RTCRtpSender; files?: ReturnType<typeof makeTransfer>
+  /** Device key verified, waiting for the TOTP code. */
+  otp?: { tries: number }
+  term?: boolean
 }
 
 const zp = (window as any).zp
@@ -23,9 +33,14 @@ let cfg: HostCfg
 let sig: Link
 let capture: MediaStream | null = null
 let locked = false
+let privacy = { privacy: false, blocked: false }
 const keyCache = new Map<string, Keys>()
 const sessions = new Map<string, Session>()
 const seenSids = new Set<string>()
+/** Devices that passed TOTP recently: a phone reconnecting after a trip to the background is not asked again. */
+const otpGrace = new Map<string, number>()
+const OTP_GRACE_MS = 10 * 60_000
+let otpFails: number[] = []
 let onChange = () => {}
 
 export const hostCfg = () => cfg
@@ -54,6 +69,14 @@ export async function startHost(changed: () => void) {
   sig = link(cfg.hostId, { name: cfg.name })
   sig.onMsg((env) => void onSignal(env).catch(console.error))
   zp.onLocked((v: boolean) => { locked = v; tellAll({ t: 'state', locked }) })
+  zp.onTerm((sid: string, kind: string, data: unknown) => {
+    const s = sessions.get(sid)
+    if (!s?.authed) return
+    if (kind === 'exit') { s.term = false; return tell(s, { t: 'term', exit: data }) }
+    // One data-channel message must stay well under 256 KB.
+    const text = String(data)
+    for (let i = 0; i < text.length; i += 16_000) tell(s, { t: 'term', s: text.slice(i, i + 16_000) })
+  })
   // Free Supabase projects pause after a week without database traffic; Realtime alone may not count.
   const ping = () => void supa.rpc('ping')
   ping()
@@ -78,13 +101,29 @@ export async function revoke(devId: string) {
 }
 
 /** `ice` is a JSON array of RTCIceServer (TURN credentials live only here, never in the public controller). */
-export async function updateSettings(name: string, ice: string) {
+export async function updateSettings(name: string, ice: string, lockOnEnd: boolean) {
   const servers = ice.trim() ? JSON.parse(ice) : undefined
   if (servers && !(Array.isArray(servers) && servers.every((x) => x && x.urls))) throw new Error('ICE servers phải là mảng JSON các { urls, username?, credential? }')
   cfg.name = name || cfg.name
   cfg.iceServers = servers
+  cfg.lockOnEnd = lockOnEnd
   await save()
 }
+
+/** New TOTP secret for the setup dialog; nothing is stored until `totpEnable` sees a valid code from the app. */
+export function totpBegin() {
+  const secret = base32(rand(20))
+  return { secret, uri: otpauthUri(secret, cfg.name) }
+}
+export async function totpEnable(secret: string, code: string) {
+  const step = await verifyTotp(secret, code.replace(/\s/g, ''))
+  if (step < 0) return false
+  cfg.totp = { secret, last: step }
+  otpGrace.clear()
+  await save()
+  return true
+}
+export async function totpDisable() { cfg.totp = undefined; await save() }
 
 // ---- signaling --------------------------------------------------------------------------------
 
@@ -133,7 +172,7 @@ async function startSession(dev: Device, keys: Keys, sid: string) {
   }
   ctl.onopen = () => {
     ctl.send(JSON.stringify({ t: 'chal', nh: b64(s.nh) }))
-    setTimeout(() => { if (!s.authed) end(s) }, 10_000)
+    setTimeout(() => { if (!s.authed && !s.otp) end(s) }, 10_000)
   }
   ctl.onmessage = (e) => void onCtl(s, file, JSON.parse(e.data)).catch((err) => { console.error(err); end(s) })
   mv.onmessage = (e) => { if (s.authed) input(s, JSON.parse(e.data)) }
@@ -150,8 +189,15 @@ function end(s: Session) {
     if (h.startsWith('b')) zp.input({ t: 'mb', b: +h.slice(1), d: 0 })
     else zp.input({ t: 'k', c: h, d: 0 })
   }
+  if (s.term) zp.termClose(s.sid)
+  if (s.authed && cfg.totp) otpGrace.set(s.dev.devId, Date.now() + OTP_GRACE_MS)
   s.pc.close()
   if (!sessions.size && capture) { capture.getTracks().forEach((t) => t.stop()); capture = null }
+  if (s.authed && !authed().length) {
+    // Nobody is watching any more: never leave the screen blacked out or the local keyboard frozen.
+    if (privacy.privacy) void zp.privacy(false).then((p: typeof privacy) => (privacy = p))
+    if (cfg.lockOnEnd) void zp.power('lock').catch(console.warn)
+  }
   syncSessions()
 }
 
@@ -166,25 +212,52 @@ function syncSessions() {
 
 async function onCtl(s: Session, file: RTCDataChannel, m: Ctl) {
   if (!s.authed) {
+    if (s.otp) return void (m.t === 'otp' && (await checkOtp(s, file, String(m.code ?? ''))))
     if (m.t !== 'auth') return
     const fpH = fingerprint(s.pc.localDescription!.sdp), fpC = fingerprint(s.pc.remoteDescription!.sdp)
     const nc = unb64(String(m.nc)) // throws on garbage → caller ends the session
     if (nc.length !== 32 || !(await authVerify(s.keys.auth, String(m.mac), 'c2h', s.nh, nc, fpH, fpC, s.sid))) return end(s)
-    s.authed = true
-    s.dev.seen = Date.now()
-    tell(s, { t: 'ok', mac: await authMac(s.keys.auth, 'h2c', nc, s.nh, fpH, fpC, s.sid) })
-    // Only from here on does anything the controller sends reach the machine: files, input, clipboard.
-    s.files = makeTransfer(file, openSink, (dir, name, done, size) => {
-      if (done >= size || done % (1 << 20) < 16 * 1024) tell(s, { t: 'xfer', dir: dir === 'up' ? 'down' : 'up', name, done, size })
-    })
-    await attachMedia(s)
-    tell(s, { t: 'state', name: cfg.name, platform: zp.platform, locked, ...(await zp.displays()) })
-    syncSessions()
-    void save()
+    const needOtp = !!cfg.totp && !((otpGrace.get(s.dev.devId) ?? 0) > Date.now())
+    tell(s, { t: 'ok', mac: await authMac(s.keys.auth, 'h2c', nc, s.nh, fpH, fpC, s.sid), ...(needOtp ? { otp: 1 } : {}) })
+    if (!needOtp) return admit(s, file)
+    s.otp = { tries: 0 }
+    setTimeout(() => { if (!s.authed) end(s) }, 180_000)
     return
   }
   if (INPUT_TYPES.has(m.t)) return input(s, m as Input)
   await handlers[m.t]?.(s, m)
+}
+
+async function checkOtp(s: Session, file: RTCDataChannel, code: string) {
+  const now = Date.now()
+  otpFails = otpFails.filter((t) => now - t < 15 * 60_000)
+  // Global brake: 10 wrong codes in 15 minutes (any device) and every attempt is refused until they age out.
+  if (otpFails.length >= 10) return tell(s, { t: 'otp', bad: 1, msg: 'Sai quá nhiều lần — thử lại sau 15 phút' })
+  let step = await verifyTotp(cfg.totp!.secret, code, cfg.totp!.last)
+  if (!s.otp || !sessions.has(s.sid)) return // ended, or another message already passed while we were checking
+  if (step <= cfg.totp!.last) step = -1 // a parallel session used this code meanwhile
+  if (step < 0) {
+    otpFails.push(now)
+    if (++s.otp!.tries >= 5) return end(s)
+    return tell(s, { t: 'otp', bad: 1 })
+  }
+  cfg.totp!.last = step
+  s.otp = undefined
+  tell(s, { t: 'otp', ok: 1 })
+  await admit(s, file)
+}
+
+/** Fully authenticated: from here on what the controller sends reaches the machine (files, input, clipboard). */
+async function admit(s: Session, file: RTCDataChannel) {
+  s.authed = true
+  s.dev.seen = Date.now()
+  s.files = makeTransfer(file, openSink, (dir, name, done, size) => {
+    if (done >= size || done % (1 << 20) < 16 * 1024) tell(s, { t: 'xfer', dir: dir === 'up' ? 'down' : 'up', name, done, size })
+  })
+  await attachMedia(s)
+  tell(s, { t: 'state', name: cfg.name, platform: zp.platform, locked, ...privacy, macs: await zp.macs(), ...(await zp.displays()) })
+  syncSessions()
+  void save()
 }
 
 function input(s: Session, m: Input) {
@@ -213,6 +286,28 @@ const handlers: Record<string, (s: Session, m: Ctl) => unknown> = {
     for (const f of await zp.filePick()) {
       await s.files!.send(f.name, f.size, (o, n) => zp.fileRead(f.id, o, n)).finally(() => zp.fileDone(f.id))
     }
+  },
+  /** lock | logoff | restart | shutdown — the controller asks for confirmation before sending. */
+  async power(s, m) {
+    try { await zp.power(String(m.cmd)); tell(s, { t: 'note', s: 'Đã gửi lệnh' }) } catch (e: any) { tell(s, { t: 'note', s: `Lệnh thất bại: ${e?.message ?? e}` }) }
+  },
+  async sysinfo(s) { tell(s, { t: 'sysinfo', ...(await zp.sysInfo()) }) },
+  async kill(s, m) {
+    try { await zp.kill(m.pid) } catch (e: any) { tell(s, { t: 'note', s: `Không kết thúc được: ${e?.message ?? e}` }) }
+    tell(s, { t: 'sysinfo', ...(await zp.sysInfo()) })
+  },
+  async privacy(_s, m) {
+    privacy = await zp.privacy(!!m.on)
+    tellAll({ t: 'state', ...privacy })
+  },
+  async term(s, m) {
+    if (m.open) { await zp.termOpen(s.sid); s.term = true }
+    else if (m.close) { zp.termClose(s.sid); s.term = false }
+    else if (s.term && typeof m.s === 'string') zp.termWrite(s.sid, m.s.slice(0, 64_000))
+  },
+  async wol(s, m) {
+    const n = await zp.wake(m.macs)
+    tell(s, { t: 'note', s: n ? `Đã gửi gói đánh thức (${n} địa chỉ MAC) vào mạng LAN của ${cfg.name}` : 'Không có địa chỉ MAC hợp lệ' })
   },
 }
 

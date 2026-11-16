@@ -1,7 +1,8 @@
 // Controller side: hosts this device is paired with. Keys are non-extractable CryptoKeys in IndexedDB.
 import type { Keys } from './proto'
 
-export interface HostEntry { hostId: string; devId: string; name: string; keys: Keys; added: number }
+/** `macs`: the host's network adapters as it last reported them, for Wake-on-LAN through another host. */
+export interface HostEntry { hostId: string; devId: string; name: string; keys: Keys; added: number; macs?: string[] }
 
 const db = new Promise<IDBDatabase>((res, rej) => {
   const r = indexedDB.open('zeroport', 1)

@@ -3,12 +3,14 @@ import { link } from './signal'
 import { authMac, authVerify, b64, fingerprint, open, rand, seal, unb64, type Ctl, type Envelope, type Input, type SigType } from './proto'
 import type { HostEntry } from './store'
 
-export type ConnState = 'connecting' | 'connected' | 'offline' | 'rejected' | 'closed'
+export type ConnState = 'connecting' | 'connected' | 'offline' | 'rejected' | 'closed' | 'otp'
 
 export interface Remote {
   send(m: Ctl | Input): void
   /** Lossy channel for pointer moves: newest wins, never queues behind a retransmit. */
   move(m: Input): void
+  /** Answers the host's TOTP prompt (state 'otp'). */
+  otp(code: string): void
   pc(): RTCPeerConnection | null
   close(): void
 }
@@ -25,7 +27,7 @@ export function connect(host: HostEntry, on: Events): Remote {
   const sig = link(host.hostId)
   let pc: RTCPeerConnection | null = null
   let ctl: RTCDataChannel | null = null, mv: RTCDataChannel | null = null
-  let sid = '', closed = false, authed = false, tries = 0
+  let sid = '', closed = false, authed = false, tries = 0, otpWait = false
   let retry: ReturnType<typeof setTimeout> | undefined
   let pendingIce: RTCIceCandidateInit[] = []
   let nonce: { nh: Uint8Array; nc: Uint8Array } | null = null
@@ -38,6 +40,7 @@ export function connect(host: HostEntry, on: Events): Remote {
     teardown()
     sid = b64(rand(16))
     authed = false
+    otpWait = false
     dialedAt = Date.now()
     on.state('connecting')
     void send('hello', { ts: Date.now() })
@@ -114,8 +117,12 @@ export function connect(host: HostEntry, on: Events): Remote {
       authed = true
       tries = 0
       clearTimeout(retry)
-      on.state('connected')
-    } else if (authed) on.ctl(m)
+      otpWait = !!m.otp
+      on.state(otpWait ? 'otp' : 'connected')
+    } else if (m.t === 'otp' && otpWait) {
+      if (m.ok) { otpWait = false; on.state('connected') }
+      else on.state('otp', m.msg ? String(m.msg) : 'Sai mã, thử lại')
+    } else if (authed && !otpWait) on.ctl(m)
   }
 
   function close() {
@@ -131,8 +138,9 @@ export function connect(host: HostEntry, on: Events): Remote {
 
   dial()
   return {
-    send: (m) => { if (authed && ctl?.readyState === 'open') ctl.send(JSON.stringify(m)) },
-    move: (m) => { if (authed && mv?.readyState === 'open') mv.send(JSON.stringify(m)) },
+    send: (m) => { if (authed && !otpWait && ctl?.readyState === 'open') ctl.send(JSON.stringify(m)) },
+    move: (m) => { if (authed && !otpWait && mv?.readyState === 'open') mv.send(JSON.stringify(m)) },
+    otp: (code) => { if (otpWait && ctl?.readyState === 'open') ctl.send(JSON.stringify({ t: 'otp', code })) },
     pc: () => pc,
     close,
   }

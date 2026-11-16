@@ -88,16 +88,16 @@ Không giới hạn thiết bị, số phiên, thời gian phiên; không quản
 |---|---|---|---|---|
 | 11 | Ghi hình phiên | UltraViewer Premium, AnyDesk, TeamViewer | `MediaRecorder` trên controller → tải .webm | ☑ |
 | 12 | Chụp ảnh màn hình | — | canvas → PNG | ☑ |
-| 13 | Chế độ riêng tư (đen màn hình host + chặn chuột/phím tại chỗ) | AnyViewer, AnyDesk, TeamViewer | Cửa sổ đen phủ kín có `setContentProtection` (không lọt vào luồng chụp) + `BlockInput` khi elevated; chỉ Windows | ☐ |
-| 14 | Phím tắt hệ thống từ xa: khoá máy, Task Manager, khởi động lại, tắt máy | AnyViewer (free), AnyDesk | Lệnh qua data channel | ☐ |
-| 15 | Chuột game (chuột tương đối) | AnyViewer | Pointer Lock → `MOUSEEVENTF_MOVE` tương đối | ☐ |
-| 16 | Terminal từ xa | AnyDesk, RustDesk | spawn shell, stdin/stdout qua data channel | ☐ |
-| 17 | Thông tin hệ thống / tiến trình | TeamViewer | `os` + `tasklist`/`ps` | ☐ |
-| 18 | Wake-on-LAN | UltraViewer, AnyDesk, TeamViewer | Một host khác cùng LAN gửi magic packet (`node:dgram`) | ☐ |
-| 19 | Xác thực 2 lớp (TOTP) khi kết nối | AnyDesk, AnyViewer | Kiểm tra trên host sau bước xác thực khoá thiết bị | ☐ |
-| 20 | Khoá máy khi ngắt kết nối | AnyDesk | `LockWorkStation` (tuỳ chọn; lưu ý v1 không mở khoá lại được từ xa) | ☐ |
+| 13 | Chế độ riêng tư (đen màn hình host + chặn chuột/phím tại chỗ) | AnyViewer, AnyDesk, TeamViewer | Cửa sổ đen phủ kín có `setContentProtection` (không lọt vào luồng chụp) + `BlockInput` khi elevated; chỉ Windows | ☑ |
+| 14 | Phím tắt hệ thống từ xa: khoá máy, Task Manager, khởi động lại, tắt máy | AnyViewer (free), AnyDesk | Lệnh qua data channel | ☑ |
+| 15 | Chuột game (chuột tương đối) | AnyViewer | Pointer Lock → `MOUSEEVENTF_MOVE` tương đối | ☑ |
+| 16 | Terminal từ xa | AnyDesk, RustDesk | spawn shell, stdin/stdout qua data channel | ☑ |
+| 17 | Thông tin hệ thống / tiến trình | TeamViewer | `os` + `tasklist`/`ps` | ☑ |
+| 18 | Wake-on-LAN | UltraViewer, AnyDesk, TeamViewer | Một host khác cùng LAN gửi magic packet (`node:dgram`) | ☑ |
+| 19 | Xác thực 2 lớp (TOTP) khi kết nối | AnyDesk, AnyViewer | Kiểm tra trên host sau bước xác thực khoá thiết bị | ☑ |
+| 20 | Khoá máy khi ngắt kết nối | AnyDesk | `LockWorkStation` (tuỳ chọn; lưu ý v1 không mở khoá lại được từ xa) | ☑ |
 | 21 | Chế độ tiết kiệm băng thông | AnyViewer (đen trắng) | Preset giảm độ phân giải/fps/bitrate | ☑ |
-| 22 | Nhiều phiên cùng lúc | AnyViewer, UltraViewer Premium | Mỗi phiên một tab/cửa sổ | ☐ |
+| 22 | Nhiều phiên cùng lúc | AnyViewer, UltraViewer Premium | Mỗi phiên một tab/cửa sổ | ☑ |
 | 23 | APK Android | — | Capacitor, build trên GitHub Actions | ☐ |
 
 ### P2 — để sau
@@ -115,8 +115,8 @@ Màu 4:4:4 (VP9 profile 1/AV1), tường màn hình (xem nhiều máy cùng lúc
 1. **M0** Kế hoạch + khung repo. ✔
 2. **M1** ✔ Lõi: giao thức, mã hoá, signaling; host chụp màn hình + bơm input; controller xem + điều khiển; test trên máy này.
 3. **M2** ✔ (code xong; âm thanh, đa màn hình, cảm ứng chưa test trên thiết bị thật) P0 còn lại: clipboard, file, đa màn hình, âm thanh, preset chất lượng, UX mobile.
-4. **M3** CI: deploy controller lên GitHub Pages; build installer Windows + DMG macOS; phát hành.
-5. **M4** P1: ghi hình, chế độ riêng tư, terminal, WoL, TOTP…
+4. **M3** ✔ CI: deploy controller lên GitHub Pages; build installer Windows + DMG macOS; phát hành.
+5. **M4** ✔ (code xong; phần UI/tuỳ chọn nguồn/chế độ riêng tư/chuột game chưa test end-to-end qua WebRTC) P1: ghi hình, chế độ riêng tư, terminal, WoL, TOTP…
 6. **M5** APK Android; review bảo mật; P2 theo nhu cầu.
 
 ## 6. Việc chỉ chủ máy làm được (không chặn tiến độ)

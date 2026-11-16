@@ -4,7 +4,7 @@ import qrcode from 'qrcode-generator'
 import { link } from './signal'
 import { deriveKeys, parsePairing } from './proto'
 import { listHosts, removeHost, saveHost, type HostEntry } from './store'
-import { activeSessions, hostCfg, hostStats, isHost, newPairing, revoke, startHost, updateSettings } from './host'
+import { activeSessions, hostCfg, hostStats, isHost, newPairing, revoke, startHost, totpBegin, totpDisable, totpEnable, updateSettings } from './host'
 import { openSession } from './view'
 
 const app = document.getElementById('app')!
@@ -54,6 +54,7 @@ async function render() {
         <span class="dot"></span>
         <div class="grow"><div class="name">${esc(h.name)}</div><div class="sub" data-status>Đang kiểm tra…</div></div>
         <button class="primary" data-act="connect">Kết nối</button>
+        <button data-act="pop" title="Mở ở cửa sổ/tab mới">⧉</button>
         <button data-act="rename" title="Đổi tên">✎</button>
         <button class="danger" data-act="remove" title="Xoá">✕</button>
       </div>`).join('') || `<div class="empty">Chưa có máy nào. Mở ZeroPort trên máy cần điều khiển, bấm “Ghép thiết bị mới”, rồi quét QR hoặc dán mã vào đây.</div>`}
@@ -100,6 +101,7 @@ app.addEventListener('click', async (e) => {
   const host = hosts.find((h) => h.hostId === btn.closest<HTMLElement>('[data-host]')?.dataset.host)
   const devId = btn.closest<HTMLElement>('[data-dev]')?.dataset.dev
   if (act === 'connect' && host) openSession(host, render)
+  else if (act === 'pop' && host) window.open(`#c=${host.hostId}`, '_blank')
   else if (act === 'rename' && host) {
     const name = await ask('Tên máy', host.name)
     if (name) { await saveHost({ ...host, name }); await render() }
@@ -120,21 +122,58 @@ async function showSettings() {
   dlg.innerHTML = `<form method="dialog"><strong>Cài đặt máy này</strong>
     <label>Tên máy<input type="text" name="name" value="${esc(cfg.name)}" autocomplete="off"></label>
     <label class="check"><input type="checkbox" name="auto" ${(await zp.autostartGet()) ? 'checked' : ''}> Tự chạy khi đăng nhập (ẩn ở khay hệ thống)</label>
+    <label class="check"><input type="checkbox" name="lock" ${cfg.lockOnEnd ? 'checked' : ''}> Khoá máy khi người cuối cùng ngắt kết nối</label>
+    <div class="row" style="align-items:center;justify-content:space-between;margin:12px 0">
+      <span class="sub">Xác thực 2 lớp (TOTP): <b style="color:var(--text)">${cfg.totp ? 'Đang bật' : 'Đang tắt'}</b></span>
+      <button type="button" id="totp" class="${cfg.totp ? 'danger' : ''}">${cfg.totp ? 'Tắt 2FA' : 'Bật 2FA…'}</button>
+    </div>
     <label>Máy chủ TURN/STUN — JSON, để trống dùng mặc định. Chỉ cần khi mạng không nối trực tiếp được.
       <textarea name="ice" rows="4" spellcheck="false" placeholder='[{"urls":"turn:…","username":"…","credential":"…"}]'>${esc(cfg.iceServers ? JSON.stringify(cfg.iceServers) : '')}</textarea></label>
     <div class="row" style="justify-content:flex-end"><button type="button" id="no">Huỷ</button><button class="primary" value="ok">Lưu</button></div></form>`
   const f = dlg.querySelector('form')!.elements as any
   dlg.querySelector<HTMLElement>('#no')!.onclick = () => dlg.close('')
+  dlg.querySelector<HTMLElement>('#totp')!.onclick = async () => {
+    if (cfg.totp) {
+      if (!confirm('Tắt xác thực 2 lớp khi kết nối tới máy này?')) return
+      await totpDisable(); toast('Đã tắt xác thực 2 lớp'); dlg.close('')
+    } else {
+      dlg.close('')
+      showTotp()
+    }
+  }
   dlg.returnValue = ''
   dlg.showModal()
   dlg.addEventListener('close', async () => {
     if (dlg.returnValue !== 'ok') return
     try {
-      await updateSettings(f.name.value.trim(), f.ice.value)
+      await updateSettings(f.name.value.trim(), f.ice.value, f.lock.checked)
       await zp.autostartSet(f.auto.checked)
       toast('Đã lưu')
     } catch (err: any) { toast(`Không lưu được: ${err?.message ?? err}`) }
   }, { once: true })
+}
+
+function showTotp() {
+  const { secret, uri } = totpBegin()
+  const qr = qrcode(0, 'M')
+  qr.addData(uri)
+  qr.make()
+  const dlg = document.getElementById('dlg') as HTMLDialogElement
+  dlg.innerHTML = `<form id="tf">
+    <strong>Bật xác thực 2 lớp (TOTP)</strong>
+    <div class="sub" style="margin-top:6px">Quét QR bằng Google Authenticator / 1Password / Bitwarden, rồi nhập mã 6 số để kích hoạt.</div>
+    <div class="qr">${qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true })}</div>
+    <code>${esc(secret)}</code>
+    <input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="Mã 6 số" required style="margin-bottom:12px">
+    <div class="row" style="justify-content:flex-end"><button type="button" id="no">Huỷ</button><button class="primary">Kích hoạt</button></div></form>`
+  dlg.querySelector<HTMLElement>('#no')!.onclick = () => dlg.close()
+  dlg.querySelector<HTMLFormElement>('#tf')!.onsubmit = async (e) => {
+    e.preventDefault()
+    const code = dlg.querySelector<HTMLInputElement>('input')!.value.trim()
+    if (await totpEnable(secret, code)) { toast('Đã bật xác thực 2 lớp'); dlg.close() }
+    else toast('Mã chưa đúng — kiểm tra lại đồng hồ hoặc nhập mã mới')
+  }
+  dlg.showModal()
 }
 
 function showPairing(p: { code: string; link: string }) {
@@ -162,6 +201,11 @@ async function boot() {
     const text = location.hash
     history.replaceState(null, '', location.pathname + location.search)
     await addPairing(text)
+  } else if (location.hash.startsWith('#c=')) {
+    const id = location.hash.slice(3)
+    history.replaceState(null, '', location.pathname + location.search)
+    const target = hosts.find((h) => h.hostId === id)
+    if (target) openSession(target, render)
   }
 }
 boot().catch((err) => { console.error(err); app.textContent = `Lỗi khởi động: ${err?.message ?? err}` })
