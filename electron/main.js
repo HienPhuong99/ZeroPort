@@ -21,7 +21,7 @@ if (!app.requestSingleInstanceLock()) app.quit()
 else app.whenReady().then(start)
 
 app.on('second-instance', () => { win?.show(); win?.focus() })
-app.on('before-quit', () => { quitting = true; sys.privacy(false); sys.termCloseAll() })
+app.on('before-quit', () => { quitting = true; sys.privacy(false); sys.termCloseAll(); void sys.annotate({ close: true }); sys.tcpCloseAll() })
 app.on('window-all-closed', () => {}) // keep serving from the tray
 
 function start() {
@@ -36,8 +36,9 @@ function start() {
   if (dev) win.loadURL(baseUrl)
   else win.loadFile(join(dir, '../dist/index.html'))
   win.on('close', (e) => { if (!quitting) { e.preventDefault(); win.hide() } })
+  win.webContents.on('render-process-gone', () => { sys.privacy(false); sys.termCloseAll(); void sys.annotate({ close: true }); sys.tcpCloseAll() })
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (!url.startsWith(baseUrl + '#c=')) return { action: 'deny' }
+    if (!url.startsWith(baseUrl + '#c=') || !/^[A-Za-z0-9_-]{16,32}$/.test(url.slice((baseUrl + '#c=').length))) return { action: 'deny' }
     return {
       action: 'allow',
       overrideBrowserWindowOptions: {
@@ -156,13 +157,21 @@ ipcMain.handle('file:open', async (e, name) => {
   if (!mine(e)) return
   const dirOut = join(app.getPath('downloads'), 'ZeroPort')
   await mkdir(dirOut, { recursive: true })
-  const { name: stem, ext } = parse(basename(String(name).replace(/[<>:"|?*\x00-\x1f]/g, '_')) || 'file')
+  const clean = basename(String(name).replace(/[/\\<>:"|?*\x00-\x1f]/g, '_'))
+  const parsed = parse(clean)
+  const stem = !parsed.name || parsed.name === '.' || parsed.name === '..' || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(parsed.name) ? 'file' : parsed.name
+  const ext = parsed.ext === '.' ? '' : parsed.ext
   for (let i = 0; ; i++) { // never overwrite: "a.txt", "a (1).txt", ...
     const path = join(dirOut, `${stem}${i ? ` (${i})` : ''}${ext}`)
     try { incoming.set(++nextId, { fh: await open(path, 'wx'), path }); return nextId } catch (err) { if (err.code !== 'EEXIST') throw err }
   }
 })
-ipcMain.handle('file:write', async (e, id, chunk) => { if (mine(e)) await incoming.get(id).fh.write(Buffer.from(chunk)) })
+ipcMain.handle('file:write', async (e, id, chunk) => {
+  if (!mine(e)) return
+  const f = incoming.get(id)
+  if (!f) throw new Error('bad file id')
+  await f.fh.write(Buffer.from(chunk))
+})
 ipcMain.handle('file:close', async (e, id, ok) => {
   const f = incoming.get(id)
   if (!mine(e) || !f) return
@@ -182,8 +191,10 @@ ipcMain.handle('file:pick', async (e) => {
 })
 ipcMain.handle('file:read', async (e, id, offset, length) => {
   if (!mine(e)) return
+  const fh = outgoing.get(id)
+  if (!fh || !Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(length) || length < 0 || length > (1 << 20)) throw new Error('bad read')
   const buf = Buffer.alloc(length)
-  const { bytesRead } = await outgoing.get(id).read(buf, 0, length, offset)
+  const { bytesRead } = await fh.read(buf, 0, length, offset)
   return buf.subarray(0, bytesRead)
 })
 ipcMain.handle('file:done', async (e, id) => { if (mine(e)) { await outgoing.get(id)?.close(); outgoing.delete(id) } })
@@ -199,6 +210,17 @@ ipcMain.handle('sys:wake', guard((list) => sys.wake(list)))
 ipcMain.handle('term:open', guard((id) => sys.termOpen(String(id), (kind, data) => win?.webContents.send('term', String(id), kind, data))))
 ipcMain.on('term:write', (e, id, s) => { if (mine(e)) sys.termWrite(String(id), s) })
 ipcMain.on('term:close', (e, id) => { if (mine(e)) sys.termClose(String(id)) })
+
+const displayBounds = () => (screen.getAllDisplays().find((x) => String(x.id) === selected) ?? screen.getPrimaryDisplay()).bounds
+ipcMain.handle('sys:annotate', guard((msg) => sys.annotate(msg, displayBounds())))
+ipcMain.on('tcp:host:open', (e, sid, id, port) => { if (mine(e)) sys.tcpHostOpen(String(sid), id >>> 0, port | 0, (kind, cid, data) => win?.webContents.send('tcp:host', String(sid), kind, cid, data)) })
+ipcMain.on('tcp:host:send', (e, sid, id, buf) => { if (mine(e)) sys.tcpHostSend(String(sid), id >>> 0, buf) })
+ipcMain.on('tcp:host:drop', (e, sid, id) => { if (mine(e)) sys.tcpHostDrop(String(sid), id >>> 0) })
+ipcMain.handle('tcp:ctl:listen', guard((sid, lp, rp) => sys.tcpListen(String(sid), lp | 0, rp | 0, (kind, cid, data) => win?.webContents.send('tcp:ctl', String(sid), kind, cid, data))))
+ipcMain.on('tcp:ctl:unlisten', (e, sid, lp) => { if (mine(e)) sys.tcpUnlisten(String(sid), lp | 0) })
+ipcMain.on('tcp:ctl:send', (e, sid, id, buf) => { if (mine(e)) sys.tcpCtlSend(String(sid), id >>> 0, buf) })
+ipcMain.on('tcp:ctl:drop', (e, sid, id) => { if (mine(e)) sys.tcpCtlDrop(String(sid), id >>> 0) })
+ipcMain.on('tcp:closeAll', (e, sid) => { if (mine(e)) sys.tcpCloseAll(sid ? String(sid) : undefined) })
 
 // ---- settings ---------------------------------------------------------------------------------
 // Only meaningful for the installed app: in development this would register electron.exe itself.

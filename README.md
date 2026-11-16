@@ -4,7 +4,8 @@
 Không mở port, không tự chạy server, mã hoá đầu-cuối. Phi thương mại.
 
 - Kế hoạch, kiến trúc, danh sách tính năng: [docs/PLAN.md](docs/PLAN.md)
-- Trạng thái: M1 — host Windows + controller chạy được trọn tuyến (ghép cặp, mã hoá, video, chuột/phím).
+- Controller web / PWA: https://hienphuong99.github.io/ZeroPort/
+- Trạng thái: hoàn tất M0–M5 (host Windows/macOS, controller web/PWA/desktop/Android APK, P0–P1 và các tính năng P2 không cần driver).
 
 ## Chạy thử (dev)
 

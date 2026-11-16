@@ -98,10 +98,14 @@ Không giới hạn thiết bị, số phiên, thời gian phiên; không quản
 | 20 | Khoá máy khi ngắt kết nối | AnyDesk | `LockWorkStation` (tuỳ chọn; lưu ý v1 không mở khoá lại được từ xa) | ☑ |
 | 21 | Chế độ tiết kiệm băng thông | AnyViewer (đen trắng) | Preset giảm độ phân giải/fps/bitrate | ☑ |
 | 22 | Nhiều phiên cùng lúc | AnyViewer, UltraViewer Premium | Mỗi phiên một tab/cửa sổ | ☑ |
-| 23 | APK Android | — | Capacitor, build trên GitHub Actions | ☐ |
+| 23 | APK Android | — | Capacitor, build trên GitHub Actions | ☑ |
 
-### P2 — để sau
-Màu 4:4:4 (VP9 profile 1/AV1), tường màn hình (xem nhiều máy cùng lúc), chuyển tiếp cổng TCP (chỉ controller Electron), in từ xa (in ra PDF rồi tự tải về), bảng vẽ chú thích, service SYSTEM cho màn hình khoá/UAC.
+### P2 — nâng cao
+- ☑ **Màu 4:4:4 (AV1 / VP9 profile 1+)**: tuỳ chọn codec trong menu Chất lượng.
+- ☑ **Tường màn hình**: lưới xem nhiều máy cùng lúc, bấm để điều khiển.
+- ☑ **Chuyển tiếp cổng TCP (chỉ controller Electron)**: chuyển tiếp loopback `127.0.0.1` qua data channel.
+- ☑ **Bảng vẽ chú thích**: vẽ lên màn hình từ xa với lớp phủ click-through trên host.
+- ☐ **In từ xa (in ra PDF rồi tự tải về)** & **service SYSTEM cho màn hình khoá/UAC**: cần driver máy in ảo / service hệ thống quyền SYSTEM (giai đoạn 2, ngoài phạm vi cài đặt không quyền admin ở v1).
 
 ### Bỏ
 | Tính năng | Lý do |
@@ -117,7 +121,7 @@ Màu 4:4:4 (VP9 profile 1/AV1), tường màn hình (xem nhiều máy cùng lúc
 3. **M2** ✔ (code xong; âm thanh, đa màn hình, cảm ứng chưa test trên thiết bị thật) P0 còn lại: clipboard, file, đa màn hình, âm thanh, preset chất lượng, UX mobile.
 4. **M3** ✔ CI: deploy controller lên GitHub Pages; build installer Windows + DMG macOS; phát hành.
 5. **M4** ✔ (code xong; phần UI/tuỳ chọn nguồn/chế độ riêng tư/chuột game chưa test end-to-end qua WebRTC) P1: ghi hình, chế độ riêng tư, terminal, WoL, TOTP…
-6. **M5** APK Android; review bảo mật; P2 theo nhu cầu.
+6. **M5** ✔ APK Android (Capacitor + CI); review & gia cố bảo mật (CSP, kiểm tra replay/overflow/đường dẫn tệp/loopback TCP); P2 (4:4:4, tường màn hình, chuyển tiếp cổng TCP, bảng vẽ chú thích).
 
 ## 6. Việc chỉ chủ máy làm được (không chặn tiến độ)
 

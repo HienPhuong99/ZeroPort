@@ -2,6 +2,7 @@
 // Flow and threat model: docs/PLAN.md §2.
 import { link, supa, type Link } from './signal'
 import { makeTransfer, openSink } from './files'
+import { makeTunnel } from './tunnel'
 import { base32, otpauthUri, verifyTotp } from './totp'
 import {
   authMac, authVerify, b64, CLIP_MAX, deriveKeys, fingerprint, INPUT_TYPES, open, pairingCode, pairingLink, rand, seal, STUN, unb64,
@@ -24,6 +25,8 @@ interface Session {
   /** Device key verified, waiting for the TOTP code. */
   otp?: { tries: number }
   term?: boolean
+  tcpCh?: RTCDataChannel
+  tunnel?: ReturnType<typeof makeTunnel>
 }
 
 const zp = (window as any).zp
@@ -36,7 +39,7 @@ let locked = false
 let privacy = { privacy: false, blocked: false }
 const keyCache = new Map<string, Keys>()
 const sessions = new Map<string, Session>()
-const seenSids = new Set<string>()
+const seenSids = new Map<string, number>()
 /** Devices that passed TOTP recently: a phone reconnecting after a trip to the background is not asked again. */
 const otpGrace = new Map<string, number>()
 const OTP_GRACE_MS = 10 * 60_000
@@ -77,6 +80,12 @@ export async function startHost(changed: () => void) {
     const text = String(data)
     for (let i = 0; i < text.length; i += 16_000) tell(s, { t: 'term', s: text.slice(i, i + 16_000) })
   })
+  zp.onTcpHost((sid: string, kind: string, id: number, data: unknown) => {
+    const s = sessions.get(sid)
+    if (!s?.authed || !s.tunnel) return
+    if (kind === 'data') s.tunnel.data(id, data as Uint8Array)
+    else if (kind === 'close') s.tunnel.close(id)
+  })
   // Free Supabase projects pause after a week without database traffic; Realtime alone may not count.
   const ping = () => void supa.rpc('ping')
   ping()
@@ -96,6 +105,7 @@ export async function newPairing(name: string) {
 export async function revoke(devId: string) {
   cfg.devices = cfg.devices.filter((d) => d.devId !== devId)
   keyCache.delete(devId)
+  otpGrace.delete(devId)
   for (const s of sessions.values()) if (s.dev.devId === devId) end(s)
   await save()
 }
@@ -137,10 +147,13 @@ async function onSignal(env: Envelope) {
   if (!body || typeof body.sid !== 'string') return // forged or not for us: drop silently
 
   if (env.t === 'hello') {
-    if (Math.abs(Date.now() - body.ts) > 300_000 || seenSids.has(body.sid)) return // stale or replayed
-    seenSids.add(body.sid)
-    if (seenSids.size > 500) seenSids.delete(seenSids.values().next().value!)
+    const now = Date.now()
+    if (typeof body.ts !== 'number' || !Number.isFinite(body.ts) || Math.abs(now - body.ts) > 300_000 || seenSids.has(body.sid)) return // stale or replayed
+    for (const [k, ts] of seenSids) if (now - ts > 310_000) seenSids.delete(k)
+    if (seenSids.size >= 2000) seenSids.delete(seenSids.keys().next().value!)
+    seenSids.set(body.sid, now)
     for (const s of sessions.values()) if (s.dev.devId === dev.devId && !s.authed) end(s) // one pending handshake per device
+    if (sessions.size >= 16) return
     await startSession(dev, keys, body.sid)
     return
   }
@@ -158,10 +171,11 @@ async function startSession(dev: Device, keys: Keys, sid: string) {
   const ctl = pc.createDataChannel('ctl')
   const mv = pc.createDataChannel('mv', { ordered: false, maxRetransmits: 0 })
   const file = pc.createDataChannel('file')
+  const tcpCh = pc.createDataChannel('tcp')
   // Media lines are negotiated up front with no track; tracks are attached only after auth succeeds.
   const video = pc.addTransceiver('video', { direction: 'sendonly' }).sender
   const audio = pc.addTransceiver('audio', { direction: 'sendonly' }).sender
-  const s: Session = { sid, dev, keys, pc, ctl, nh: rand(32), authed: false, held: new Set(), video, audio }
+  const s: Session = { sid, dev, keys, pc, ctl, nh: rand(32), authed: false, held: new Set(), video, audio, tcpCh }
   sessions.set(sid, s)
 
   pc.onicecandidate = (e) => { if (e.candidate) void send('ice', { c: e.candidate.toJSON() }) }
@@ -174,8 +188,8 @@ async function startSession(dev: Device, keys: Keys, sid: string) {
     ctl.send(JSON.stringify({ t: 'chal', nh: b64(s.nh) }))
     setTimeout(() => { if (!s.authed && !s.otp) end(s) }, 10_000)
   }
-  ctl.onmessage = (e) => void onCtl(s, file, JSON.parse(e.data)).catch((err) => { console.error(err); end(s) })
-  mv.onmessage = (e) => { if (s.authed) input(s, JSON.parse(e.data)) }
+  ctl.onmessage = (e) => void Promise.resolve().then(() => onCtl(s, file, JSON.parse(e.data))).catch((err) => { console.error(err); end(s) })
+  mv.onmessage = (e) => { if (s.authed) try { input(s, JSON.parse(e.data)) } catch {} }
   setTimeout(() => { if (pc.connectionState !== 'connected') end(s) }, 30_000)
 
   await pc.setLocalDescription(await pc.createOffer())
@@ -190,12 +204,14 @@ function end(s: Session) {
     else zp.input({ t: 'k', c: h, d: 0 })
   }
   if (s.term) zp.termClose(s.sid)
+  if (s.tunnel) zp.tcpCloseAll(s.sid)
   if (s.authed && cfg.totp) otpGrace.set(s.dev.devId, Date.now() + OTP_GRACE_MS)
   s.pc.close()
   if (!sessions.size && capture) { capture.getTracks().forEach((t) => t.stop()); capture = null }
   if (s.authed && !authed().length) {
     // Nobody is watching any more: never leave the screen blacked out or the local keyboard frozen.
     if (privacy.privacy) void zp.privacy(false).then((p: typeof privacy) => (privacy = p))
+    void zp.annotate({ close: true })
     if (cfg.lockOnEnd) void zp.power('lock').catch(console.warn)
   }
   syncSessions()
@@ -225,7 +241,7 @@ async function onCtl(s: Session, file: RTCDataChannel, m: Ctl) {
     return
   }
   if (INPUT_TYPES.has(m.t)) return input(s, m as Input)
-  await handlers[m.t]?.(s, m)
+  if (Object.hasOwn(handlers, m.t)) await handlers[m.t](s, m)
 }
 
 async function checkOtp(s: Session, file: RTCDataChannel, code: string) {
@@ -253,6 +269,11 @@ async function admit(s: Session, file: RTCDataChannel) {
   s.dev.seen = Date.now()
   s.files = makeTransfer(file, openSink, (dir, name, done, size) => {
     if (done >= size || done % (1 << 20) < 16 * 1024) tell(s, { t: 'xfer', dir: dir === 'up' ? 'down' : 'up', name, done, size })
+  })
+  if (s.tcpCh) s.tunnel = makeTunnel(s.tcpCh, {
+    onOpen: (id, port) => zp.tcpHostOpen(s.sid, id, port),
+    onData: (id, bytes) => zp.tcpHostSend(s.sid, id, bytes),
+    onClose: (id) => zp.tcpHostDrop(s.sid, id),
   })
   await attachMedia(s)
   tell(s, { t: 'state', name: cfg.name, platform: zp.platform, locked, ...privacy, macs: await zp.macs(), ...(await zp.displays()) })
@@ -309,6 +330,7 @@ const handlers: Record<string, (s: Session, m: Ctl) => unknown> = {
     const n = await zp.wake(m.macs)
     tell(s, { t: 'note', s: n ? `Đã gửi gói đánh thức (${n} địa chỉ MAC) vào mạng LAN của ${cfg.name}` : 'Không có địa chỉ MAC hợp lệ' })
   },
+  anno: (_s, m) => void zp.annotate(m),
 }
 
 // ---- clipboard --------------------------------------------------------------------------------

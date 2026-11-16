@@ -34,3 +34,9 @@ function png(n, ss = 4) {
 }
 for (const [file, n] of [['public/icon-180.png', 180], ['public/icon-192.png', 192], ['public/icon-512.png', 512], ['electron/icon.png', 256], ['build/icon.png', 1024]])
   writeFileSync(file, png(n))
+for (const [dir, n, fg] of [['mdpi', 48, 108], ['hdpi', 72, 162], ['xhdpi', 96, 216], ['xxhdpi', 144, 324], ['xxxhdpi', 192, 432]]) {
+  const buf = png(n)
+  writeFileSync(`android/app/src/main/res/mipmap-${dir}/ic_launcher.png`, buf)
+  writeFileSync(`android/app/src/main/res/mipmap-${dir}/ic_launcher_round.png`, buf)
+  writeFileSync(`android/app/src/main/res/mipmap-${dir}/ic_launcher_foreground.png`, png(fg))
+}

@@ -6,6 +6,7 @@ import { deriveKeys, parsePairing } from './proto'
 import { listHosts, removeHost, saveHost, type HostEntry } from './store'
 import { activeSessions, hostCfg, hostStats, isHost, newPairing, revoke, startHost, totpBegin, totpDisable, totpEnable, updateSettings } from './host'
 import { openSession } from './view'
+import { openWall } from './wall'
 
 const app = document.getElementById('app')!
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
@@ -48,7 +49,10 @@ async function render() {
   const busy = isHost ? activeSessions() : []
   app.innerHTML = `
     <h1><img src="icon-192.png" alt="">ZeroPort</h1>
-    <h2>Máy của tôi</h2>
+    <div class="row" style="align-items:center;justify-content:space-between;margin:28px 0 10px">
+      <h2 style="margin:0">Máy của tôi</h2>
+      ${hosts.length >= 2 ? '<button data-act="wall" class="sm">Tường màn hình</button>' : ''}
+    </div>
     ${hosts.map((h) => `
       <div class="card" data-host="${h.hostId}">
         <span class="dot"></span>
@@ -101,6 +105,7 @@ app.addEventListener('click', async (e) => {
   const host = hosts.find((h) => h.hostId === btn.closest<HTMLElement>('[data-host]')?.dataset.host)
   const devId = btn.closest<HTMLElement>('[data-dev]')?.dataset.dev
   if (act === 'connect' && host) openSession(host, render)
+  else if (act === 'wall' && hosts.length) openWall(hosts, (h) => openSession(h, render), render)
   else if (act === 'pop' && host) window.open(`#c=${host.hostId}`, '_blank')
   else if (act === 'rename' && host) {
     const name = await ask('Tên máy', host.name)

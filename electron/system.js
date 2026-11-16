@@ -4,6 +4,7 @@
 import { BrowserWindow, screen } from 'electron'
 import { spawn, execFile } from 'node:child_process'
 import { createSocket } from 'node:dgram'
+import net from 'node:net'
 import os from 'node:os'
 import koffi from 'koffi'
 
@@ -157,3 +158,91 @@ export async function wake(list) {
   } finally { sock.close() }
   return valid.length
 }
+
+// ---- annotation overlay (P2) ------------------------------------------------------------------
+let annoWin = null, annoReady = null
+const ANNO_COLORS = new Set(['#ef4444', '#3b82f6', '#22c55e', '#facc15'])
+const ANNO_HTML = 'data:text/html;charset=utf-8,' + encodeURIComponent(`<!doctype html><body style="margin:0;overflow:hidden;background:transparent"><canvas id="c" style="width:100vw;height:100vh;display:block"></canvas><script>
+const c=document.getElementById('c'),g=c.getContext('2d');
+function fit(){c.width=innerWidth*devicePixelRatio;c.height=innerHeight*devicePixelRatio;g.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0)}
+fit();addEventListener('resize',fit);
+window.draw=(pts,col)=>{if(pts.length<2)return;g.strokeStyle=col;g.lineWidth=4;g.lineCap='round';g.lineJoin='round';g.beginPath();g.moveTo(pts[0][0]*innerWidth,pts[0][1]*innerHeight);for(let i=1;i<pts.length;i++)g.lineTo(pts[i][0]*innerWidth,pts[i][1]*innerHeight);g.stroke()};
+window.clr=()=>g.clearRect(0,0,innerWidth,innerHeight);
+</script></body>`)
+
+export async function annotate(msg, bounds) {
+  if (msg?.close) { if (annoWin && !annoWin.isDestroyed()) annoWin.destroy(); annoWin = annoReady = null; return }
+  if (msg?.clear) { if (annoWin && !annoWin.isDestroyed()) await annoWin.webContents.executeJavaScript('window.clr?.()').catch(() => {}); return }
+  const pts = Array.isArray(msg?.pts) ? msg.pts.slice(0, 128).filter((p) => Array.isArray(p) && p.length === 2 && Number.isFinite(p[0]) && Number.isFinite(p[1])).map(([x, y]) => [Math.min(1, Math.max(0, x)), Math.min(1, Math.max(0, y))]) : []
+  if (pts.length < 2) return
+  const color = ANNO_COLORS.has(msg.color) ? msg.color : '#ef4444'
+  if (!annoWin || annoWin.isDestroyed()) {
+    annoWin = new BrowserWindow({
+      ...bounds, frame: false, transparent: true, show: false, focusable: false, skipTaskbar: true,
+      resizable: false, movable: false, hasShadow: false, enableLargerThanScreen: true,
+      webPreferences: { contextIsolation: true, sandbox: true },
+    })
+    annoWin.setContentProtection(true)
+    annoWin.setIgnoreMouseEvents(true)
+    annoWin.setAlwaysOnTop(true, 'screen-saver')
+    if (mac) annoWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+    annoReady = annoWin.loadURL(ANNO_HTML).then(() => { if (annoWin && !annoWin.isDestroyed()) { annoWin.showInactive(); annoWin.setBounds(bounds) } })
+  }
+  await annoReady
+  if (annoWin && !annoWin.isDestroyed()) await annoWin.webContents.executeJavaScript(`window.draw(${JSON.stringify(pts)},${JSON.stringify(color)})`).catch(() => {})
+}
+
+// ---- TCP port forwarding (P2, strictly loopback 127.0.0.1) ------------------------------------
+const tcpServers = new Map() // `${sid}:${localPort}` -> { server, sid, localPort, remotePort }
+const tcpHostConns = new Map() // `${sid}:${id}` -> net.Socket
+const tcpCtlConns = new Map() // `${sid}:${id}` -> net.Socket
+let nextTcpId = 1
+
+const validPort = (p) => Number.isInteger(p) && p >= 1 && p <= 65535
+
+export function tcpHostOpen(sid, id, port, emit) {
+  if (!validPort(port) || tcpHostConns.size >= 64) return emit('close', id)
+  const key = `${sid}:${id}`
+  const sock = net.createConnection({ host: '127.0.0.1', port })
+  tcpHostConns.set(key, sock)
+  sock.on('data', (buf) => emit('data', id, buf))
+  sock.on('error', () => {})
+  sock.on('close', () => { if (tcpHostConns.delete(key)) emit('close', id) })
+}
+export const tcpHostSend = (sid, id, buf) => { tcpHostConns.get(`${sid}:${id}`)?.write(Buffer.from(buf)) }
+export const tcpHostDrop = (sid, id) => { const k = `${sid}:${id}`; tcpHostConns.get(k)?.destroy(); tcpHostConns.delete(k) }
+
+export async function tcpListen(sid, localPort, remotePort, emit) {
+  if (!validPort(localPort) || !validPort(remotePort)) throw new Error('Cổng không hợp lệ (1–65535)')
+  const skey = `${sid}:${localPort}`
+  if (tcpServers.has(skey)) throw new Error(`Cổng ${localPort} đã được chuyển tiếp`)
+  if (tcpServers.size >= 10) throw new Error('Tối đa 10 cổng chuyển tiếp')
+  const server = net.createServer((sock) => {
+    if (tcpCtlConns.size >= 64) return sock.destroy()
+    const id = nextTcpId++ >>> 0, ckey = `${sid}:${id}`
+    tcpCtlConns.set(ckey, sock)
+    emit('open', id, remotePort)
+    sock.on('data', (buf) => emit('data', id, buf))
+    sock.on('error', () => {})
+    sock.on('close', () => { if (tcpCtlConns.delete(ckey)) emit('close', id) })
+  })
+  await new Promise((res, rej) => {
+    server.once('error', rej)
+    server.listen(localPort, '127.0.0.1', () => { server.removeListener('error', rej); res() })
+  })
+  tcpServers.set(skey, { server, sid, localPort, remotePort })
+  return { localPort, remotePort }
+}
+export function tcpUnlisten(sid, localPort) {
+  const k = `${sid}:${localPort}`, entry = tcpServers.get(k)
+  if (entry) { tcpServers.delete(k); entry.server.close() }
+}
+export const tcpCtlSend = (sid, id, buf) => { tcpCtlConns.get(`${sid}:${id}`)?.write(Buffer.from(buf)) }
+export const tcpCtlDrop = (sid, id) => { const k = `${sid}:${id}`; tcpCtlConns.get(k)?.destroy(); tcpCtlConns.delete(k) }
+
+export function tcpCloseAll(sid) {
+  for (const [k, v] of tcpServers) if (!sid || v.sid === sid) { v.server.close(); tcpServers.delete(k) }
+  for (const [k, s] of tcpHostConns) if (!sid || k.startsWith(`${sid}:`)) { s.destroy(); tcpHostConns.delete(k) }
+  for (const [k, s] of tcpCtlConns) if (!sid || k.startsWith(`${sid}:`)) { s.destroy(); tcpCtlConns.delete(k) }
+}
+

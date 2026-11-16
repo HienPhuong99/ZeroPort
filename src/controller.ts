@@ -21,6 +21,8 @@ interface Events {
   ctl(m: Ctl): void
   /** The file-transfer channel of a new connection (see files.ts). */
   file(ch: RTCDataChannel): void
+  /** Optional TCP tunnel channel (only used when the controller runs in Electron). */
+  tcp?(ch: RTCDataChannel): void
 }
 
 export function connect(host: HostEntry, on: Events): Remote {
@@ -70,7 +72,7 @@ export function connect(host: HostEntry, on: Events): Remote {
     if (env?.v !== 1 || env.to !== 'c' || env.d !== host.devId) return
     const body = await open(host.keys.sig, host.hostId, env)
     if (!body || body.sid !== sid) return
-    if (env.t === 'offer' && !pc) await answer(body.sdp, body.ice)
+    if (env.t === 'offer' && !pc && typeof body.sdp === 'string' && Array.isArray(body.ice)) await answer(body.sdp, body.ice)
     else if (env.t === 'ice') pc?.remoteDescription ? await pc.addIceCandidate(body.c).catch(() => {}) : pendingIce.push(body.c)
   }
 
@@ -86,16 +88,17 @@ export function connect(host: HostEntry, on: Events): Remote {
     p.ondatachannel = ({ channel }) => {
       if (channel.label === 'mv') mv = channel
       if (channel.label === 'file') on.file(channel)
+      if (channel.label === 'tcp') on.tcp?.(channel)
       if (channel.label !== 'ctl') return
       ctl = channel
-      channel.onmessage = (e) => void onCtl(JSON.parse(e.data)).catch(console.error)
+      channel.onmessage = (e) => void Promise.resolve().then(() => onCtl(JSON.parse(e.data))).catch(console.error)
     }
     p.onconnectionstatechange = () => {
       if (p !== pc || closed) return
       if (p.connectionState === 'failed' || p.connectionState === 'closed') dial()
     }
     await p.setRemoteDescription({ type: 'offer', sdp })
-    preferCodecs(p)
+    preferCodecs(p, !!host.prefer444)
     await p.setLocalDescription(await p.createAnswer())
     await send('answer', { sdp: p.localDescription!.sdp })
     for (const c of pendingIce.splice(0)) await p.addIceCandidate(c).catch(() => {})
@@ -106,6 +109,7 @@ export function connect(host: HostEntry, on: Events): Remote {
     const fpH = () => fingerprint(pc!.remoteDescription!.sdp), fpC = () => fingerprint(pc!.localDescription!.sdp)
     if (m.t === 'chal' && !authed) {
       const nh = unb64(String(m.nh)), nc = rand(32)
+      if (nh.length !== 32) return close()
       nonce = { nh, nc }
       ctl.send(JSON.stringify({ t: 'auth', nc: b64(nc), mac: await authMac(host.keys.auth, 'c2h', nh, nc, fpH(), fpC(), sid) }))
     } else if (m.t === 'ok' && !authed) {
@@ -146,11 +150,16 @@ export function connect(host: HostEntry, on: Events): Remote {
   }
 }
 
-/** The sender uses the first codec in our answer. H.264 first: hardware decode on every phone. */
-function preferCodecs(pc: RTCPeerConnection) {
+/** The sender uses the first codec in our answer. Default H.264 (hardware decode); 4:4:4 mode prefers AV1/VP9 profile 1+. */
+function preferCodecs(pc: RTCPeerConnection, prefer444: boolean) {
   const tx = pc.getTransceivers().find((t) => t.receiver.track.kind === 'video')
   const caps = RTCRtpReceiver.getCapabilities?.('video')?.codecs
   if (!tx?.setCodecPreferences || !caps) return
-  const rank = (c: { mimeType: string }) => ['video/h264', 'video/av1', 'video/vp9', 'video/vp8'].indexOf(c.mimeType.toLowerCase()) >>> 0
+  const order = prefer444 ? ['video/av1', 'video/vp9', 'video/h264', 'video/vp8'] : ['video/h264', 'video/av1', 'video/vp9', 'video/vp8']
+  const rank = (c: { mimeType: string; sdpFmtpLine?: string }) => {
+    const base = (order.indexOf(c.mimeType.toLowerCase()) >>> 0) * 10
+    if (prefer444 && c.mimeType.toLowerCase() === 'video/vp9' && /profile-id=[12]/.test(c.sdpFmtpLine ?? '')) return base - 1
+    return base
+  }
   try { tx.setCodecPreferences([...caps].sort((a, b) => rank(a) - rank(b))) } catch { /* keep browser default */ }
 }

@@ -27,6 +27,7 @@ export function makeTransfer(ch: RTCDataChannel, open: (name: string, size: numb
       if (!Number.isSafeInteger(size) || size < 0) throw new Error('bad header')
       rx = { name, size, got: 0, sink: await open(name, size) }
     } else if (rx) {
+      if (rx.got + data.byteLength > rx.size) throw new Error('transfer size overflow')
       await rx.sink.write(data)
       rx.got += data.byteLength
     } else return
@@ -50,7 +51,7 @@ export function makeTransfer(ch: RTCDataChannel, open: (name: string, size: numb
   return { send }
 }
 
-const zp = (window as any).zp
+const zp = (globalThis as any).zp
 
 /** Where received files go: straight to disk in the desktop app, otherwise memory then a browser download. */
 export async function openSink(name: string): Promise<Sink> {

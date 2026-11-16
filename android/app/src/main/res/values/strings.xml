@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">ZeroPort</string>
+    <string name="title_activity_main">ZeroPort</string>
+    <string name="package_name">io.github.hienphuong99.zeroport</string>
+    <string name="custom_url_scheme">io.github.hienphuong99.zeroport</string>
+</resources>

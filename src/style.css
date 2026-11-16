@@ -70,3 +70,22 @@ button.sm { padding: 3px 8px; font-size: 12px; border-radius: 7px; }
 #term-out { margin: 10px 0; padding: 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; height: 50vh; overflow: auto; font: 12.5px/1.45 ui-monospace, Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
 .witem { width: 100%; display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
 .witem .sub { color: var(--dim); font-size: 12px; font-family: ui-monospace, Consolas, monospace; }
+
+#anno { position: absolute; left: 0; top: 0; transform-origin: 0 0; z-index: 2; touch-action: none; cursor: crosshair; }
+#anno[hidden] { display: none; }
+#stage.annotating { cursor: crosshair; }
+#anno-bar { position: absolute; bottom: max(12px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); display: flex; gap: 4px; background: rgba(19, 26, 38, .95); border: 1px solid var(--line); border-radius: 12px; padding: 4px; z-index: 4; }
+#anno-bar[hidden] { display: none; }
+#anno-bar button { border: 0; background: none; padding: 6px 10px; border-radius: 8px; }
+#anno-bar button.on { background: var(--line); }
+
+#wall { position: fixed; inset: 0; background: var(--bg); z-index: 10; display: flex; flex-direction: column; padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom)); gap: 10px; }
+#wall[hidden] { display: none; }
+#wall-bar { display: flex; justify-content: space-between; align-items: center; }
+#wall-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; overflow: auto; }
+.wtile { position: relative; background: #000; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; cursor: pointer; min-height: 180px; }
+.wtile:hover { border-color: var(--accent); }
+.wtile video { width: 100%; height: 100%; object-fit: contain; display: block; }
+.wcap { position: absolute; inset: auto 0 0 0; display: flex; justify-content: space-between; gap: 8px; padding: 6px 10px; background: linear-gradient(transparent, rgba(0, 0, 0, .8)); font-size: 12px; }
+.wname { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wstat { color: var(--dim); flex: none; }

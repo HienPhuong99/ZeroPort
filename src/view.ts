@@ -1,11 +1,13 @@
 // Session screen: remote video plus everything that turns local mouse / touch / keyboard into Input messages.
 import { connect, type ConnState, type Remote } from './controller'
 import { download, makeTransfer, openSink } from './files'
+import { makeTunnel } from './tunnel'
 import { listHosts, saveHost, type HostEntry } from './store'
 import { CLIP_MAX, type Ctl } from './proto'
 
 const root = document.getElementById('session')!
 const coarse = matchMedia('(pointer: coarse)').matches
+const zp = (window as any).zp
 const esc = (s: unknown) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 
 const QUALITY: Record<string, object> = {
@@ -13,6 +15,7 @@ const QUALITY: Record<string, object> = {
   'Nét nhất': { kbps: 25000, fps: 60 },
   'Mượt': { kbps: 8000, fps: 60, smooth: true },
   'Tiết kiệm': { kbps: 1200, fps: 24, scale: 1.5, smooth: true },
+  '4:4:4 (AV1/VP9)': { kbps: 30000, fps: 60 },
 }
 const KEYS: [string, string[]][] = [
   ['Esc', ['Escape']], ['Tab', ['Tab']], ['Del', ['Delete']], ['Win', ['MetaLeft']],
@@ -29,6 +32,7 @@ const MORE: [string, string][] = [
   ['privacy', 'Chế độ riêng tư'], ['power', 'Khoá / nguồn…'],
   ['info', 'Thông tin hệ thống'], ['term', 'Terminal'],
   ...(coarse ? [] : [['game', 'Chuột game (khoá con trỏ)'] as [string, string]]), ['wol', 'Đánh thức máy khác'],
+  ['anno', 'Bảng vẽ chú thích'], ...(zp ? [['tcp', 'Chuyển tiếp cổng TCP'] as [string, string]] : []),
 ]
 const POWER: [string, string, string][] = [
   ['lock', 'Khoá máy', ''],
@@ -41,7 +45,15 @@ const stamp = () => new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
 export function openSession(host: HostEntry, onClose: () => void) {
   root.hidden = false
   root.innerHTML = `
-    <div id="stage"><video autoplay playsinline muted disablepictureinpicture></video></div>
+    <div id="stage"><video autoplay playsinline muted disablepictureinpicture></video><canvas id="anno" hidden></canvas></div>
+    <div id="anno-bar" hidden>
+      <button data-c="#ef4444" class="on" style="color:#ef4444">●</button>
+      <button data-c="#3b82f6" style="color:#3b82f6">●</button>
+      <button data-c="#22c55e" style="color:#22c55e">●</button>
+      <button data-c="#facc15" style="color:#facc15">●</button>
+      <button id="anno-clr">Xoá</button>
+      <button id="anno-exit" class="danger">Thoát vẽ</button>
+    </div>
     <div id="veil"><div><strong></strong><div id="veil-msg"></div></div></div>
     <div id="bar">
       <button id="grip" title="Thu gọn">☰</button>
@@ -66,7 +78,7 @@ export function openSession(host: HostEntry, onClose: () => void) {
       <div class="row" style="justify-content:flex-end"><button type="button" id="otpno">Huỷ</button><button class="primary">Xác nhận</button></div></form></dialog>
     <textarea id="kb" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false"></textarea>`
   const $ = <T extends HTMLElement>(s: string) => root.querySelector<T>(s)!
-  const stage = $('#stage'), video = $<HTMLVideoElement>('video'), veil = $('#veil'), veilMsg = $('#veil-msg')
+  const stage = $('#stage'), video = $<HTMLVideoElement>('video'), anno = $<HTMLCanvasElement>('#anno'), annoBar = $('#anno-bar'), veil = $('#veil'), veilMsg = $('#veil-msg')
   const bar = $('#bar'), menu = $('#menu'), stats = $('#stats'), note = $('#note'), kb = $<HTMLTextAreaElement>('#kb'), pick = $<HTMLInputElement>('#pick')
   const panel = $<HTMLDialogElement>('#panel'), otpDlg = $<HTMLDialogElement>('#otpdlg')
   veil.querySelector('strong')!.textContent = host.name
@@ -77,6 +89,14 @@ export function openSession(host: HostEntry, onClose: () => void) {
   let files: ReturnType<typeof makeTransfer> | null = null
   let clipLast = '', clipRemote = ''
   let privacyOn = false, platform = ''
+  const tcpSid = crypto.randomUUID(), tunnels = new Map<number, number>()
+  let tunnel: ReturnType<typeof makeTunnel> | null = null
+  const offTcp = zp?.onTcpCtl((sid: string, kind: string, id: number, data: unknown) => {
+    if (sid !== tcpSid || !tunnel) return
+    if (kind === 'open') tunnel.open(id, data as number)
+    else if (kind === 'data') tunnel.data(id, data as Uint8Array)
+    else if (kind === 'close') tunnel.close(id)
+  })
 
   let noteTimer = 0
   function say(text: string, ms = 4000) {
@@ -116,6 +136,13 @@ export function openSession(host: HostEntry, onClose: () => void) {
         say(`${dir === 'up' ? '↑' : '↓'} ${name} ${pct}%${done >= size && dir === 'down' ? ' — đã lưu' : ''}`, done >= size ? 4000 : 0)
       })
     },
+    tcp(ch) {
+      if (!zp) return
+      tunnel = makeTunnel(ch, {
+        onData: (id, bytes) => zp.tcpCtlSend(tcpSid, id, bytes),
+        onClose: (id) => zp.tcpCtlDrop(tcpSid, id),
+      })
+    },
     ctl(m: Ctl) {
       if (m.t === 'state') {
         if (m.displays) { displays = m.displays; display = m.display; $('[data-a=screen]').hidden = displays.length < 2 }
@@ -151,6 +178,11 @@ export function openSession(host: HostEntry, onClose: () => void) {
     const fit = (pan: number, size: number, box: number) => (size * zoom <= box ? (box - size * zoom) / 2 : Math.min(0, Math.max(box - size * zoom, pan)))
     panX = fit(panX, w, sw); panY = fit(panY, h, sh)
     Object.assign(video.style, { width: `${w}px`, height: `${h}px`, transform: `translate(${panX}px,${panY}px) scale(${zoom})` })
+    Object.assign(anno.style, { width: `${w}px`, height: `${h}px`, transform: `translate(${panX}px,${panY}px) scale(${zoom})` })
+    if (anno.width !== Math.round(w * devicePixelRatio) || anno.height !== Math.round(h * devicePixelRatio)) {
+      anno.width = Math.max(1, Math.round(w * devicePixelRatio))
+      anno.height = Math.max(1, Math.round(h * devicePixelRatio))
+    }
   }
   const norm = (e: { clientX: number; clientY: number }) => {
     const r = video.getBoundingClientRect()
@@ -460,6 +492,83 @@ export function openSession(host: HostEntry, onClose: () => void) {
     panel.showModal()
   }
 
+  // ---- P2: annotation overlay & Electron TCP port forwarding -------------------------------------
+  let annoColor = '#ef4444', annoPts: [number, number][] = [], annoDown = false
+  const annoCtx = anno.getContext('2d')!
+  function setAnno(on: boolean) {
+    anno.hidden = annoBar.hidden = !on
+    stage.classList.toggle('annotating', on)
+    if (!on) { annoCtx.clearRect(0, 0, anno.width, anno.height); remote.send({ t: 'anno', close: true }) }
+    else layout()
+  }
+  const drawLocal = (pts: [number, number][], col: string) => {
+    if (pts.length < 2) return
+    annoCtx.strokeStyle = col; annoCtx.lineWidth = 4 * devicePixelRatio; annoCtx.lineCap = 'round'; annoCtx.lineJoin = 'round'
+    annoCtx.beginPath(); annoCtx.moveTo(pts[0][0] * anno.width, pts[0][1] * anno.height)
+    for (let i = 1; i < pts.length; i++) annoCtx.lineTo(pts[i][0] * anno.width, pts[i][1] * anno.height)
+    annoCtx.stroke()
+  }
+  anno.addEventListener('pointerdown', (e) => {
+    e.stopPropagation(); anno.setPointerCapture(e.pointerId); annoDown = true
+    const p = norm(e); annoPts = [[Math.min(1, Math.max(0, p.x)), Math.min(1, Math.max(0, p.y))]]
+  }, sig)
+  anno.addEventListener('pointermove', (e) => {
+    if (!annoDown) return
+    e.stopPropagation()
+    const p = norm(e), pt: [number, number] = [Math.min(1, Math.max(0, p.x)), Math.min(1, Math.max(0, p.y))]
+    const prev = annoPts[annoPts.length - 1]
+    drawLocal([prev, pt], annoColor)
+    annoPts.push(pt)
+    if (annoPts.length >= 16) { remote.send({ t: 'anno', pts: annoPts, color: annoColor }); annoPts = [pt] }
+  }, sig)
+  const endStroke = () => {
+    if (!annoDown) return
+    annoDown = false
+    if (annoPts.length >= 2) remote.send({ t: 'anno', pts: annoPts, color: annoColor })
+    annoPts = []
+  }
+  anno.addEventListener('pointerup', endStroke, sig)
+  anno.addEventListener('pointercancel', endStroke, sig)
+  annoBar.addEventListener('pointerdown', (e) => e.preventDefault(), sig)
+  annoBar.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('button')
+    if (!b) return
+    if (b.dataset.c) {
+      annoColor = b.dataset.c
+      annoBar.querySelectorAll('[data-c]').forEach((x) => x.classList.toggle('on', x === b))
+    } else if (b.id === 'anno-clr') { annoCtx.clearRect(0, 0, anno.width, anno.height); remote.send({ t: 'anno', clear: true }) }
+    else if (b.id === 'anno-exit') setAnno(false)
+  }, sig)
+
+  function showTcp() {
+    const paint = () => {
+      const list = [...tunnels.entries()]
+      panel.innerHTML = `<strong>Chuyển tiếp cổng TCP (chỉ loopback 127.0.0.1)</strong>
+        <div class="sub" style="margin:6px 0 12px">Mở cổng trên máy này trỏ tới 127.0.0.1 trên máy chủ (ví dụ SSH 2222 → 22).</div>
+        ${list.map(([lp, rp]) => `<div class="witem"><span>127.0.0.1:${lp} → máy chủ :${rp}</span><button data-un="${lp}" class="danger sm">Dừng</button></div>`).join('')
+          || '<div class="sub" style="margin-bottom:10px">Chưa có đường hầm nào.</div>'}
+        <form id="tcpf" class="row" style="margin-top:10px">
+          <input type="text" name="lp" inputmode="numeric" placeholder="Cổng máy này (vd 2222)" required>
+          <input type="text" name="rp" inputmode="numeric" placeholder="Cổng máy chủ (vd 22)" required>
+          <button class="primary">Mở</button>
+        </form>
+        <div class="row" style="justify-content:flex-end;margin-top:12px"><button type="button" id="tclose">Đóng</button></div>`
+      panel.querySelector('#tclose')!.addEventListener('click', () => panel.close())
+      panel.querySelectorAll<HTMLElement>('[data-un]').forEach((b) => {
+        b.onclick = () => { const lp = +b.dataset.un!; zp.tcpUnlisten(tcpSid, lp); tunnels.delete(lp); paint() }
+      })
+      panel.querySelector('#tcpf')!.addEventListener('submit', async (e) => {
+        e.preventDefault()
+        const f = (e.target as HTMLFormElement).elements as any
+        const lp = parseInt(f.lp.value, 10), rp = parseInt(f.rp.value, 10)
+        try { await zp.tcpListen(tcpSid, lp, rp); tunnels.set(lp, rp); paint() }
+        catch (err: any) { say(`Lỗi mở cổng: ${err?.message ?? err}`) }
+      })
+    }
+    paint()
+    panel.showModal()
+  }
+
   // ---- toolbar ------------------------------------------------------------------------------------
   const paintMods = () => menu.querySelectorAll<HTMLElement>('[data-mod]').forEach((b) => b.classList.toggle('on', sticky.has(b.dataset.mod!)))
   function showMenu(kind: string) {
@@ -471,7 +580,10 @@ export function openSession(host: HostEntry, onClose: () => void) {
         MODS.map(([l, c]) => `<button data-mod="${c}">${l}</button>`).join('') + '<span></span>' +
         KEYS.map(([l], i) => `<button data-key="${i}">${l}</button>`).join('')
       paintMods()
-    } else if (kind === 'quality') menu.innerHTML = Object.keys(QUALITY).map((q) => `<button data-q="${q}">${q}</button>`).join('')
+    } else if (kind === 'quality') menu.innerHTML = Object.keys(QUALITY).map((q) => {
+      const on = q.startsWith('4:4:4') && host.prefer444 ? ' class="on"' : ''
+      return `<button data-q="${q}"${on}>${q}</button>`
+    }).join('')
     else if (kind === 'screen') menu.innerHTML = displays.map((d) => `<button data-d="${d.id}" class="${d.id === display ? 'on' : ''}">${d.label}</button>`).join('')
     else if (kind === 'more') menu.innerHTML = MORE.map(([a, l]) => {
       const label = a === 'rec' && rec ? 'Dừng ghi' : a === 'privacy' && privacyOn ? 'Tắt chế độ riêng tư' : a === 'game' && game ? 'Tắt chuột game' : l
@@ -492,7 +604,13 @@ export function openSession(host: HostEntry, onClose: () => void) {
     }
     if (b.dataset.key) { combo(KEYS[+b.dataset.key][1]); if (sticky.size) releaseAll(); return }
     menu.hidden = true
-    if (b.dataset.q) remote.send({ t: 'quality', ...QUALITY[b.dataset.q] })
+    if (b.dataset.q) {
+      const want444 = b.dataset.q.startsWith('4:4:4')
+      remote.send({ t: 'quality', ...QUALITY[b.dataset.q] })
+      if (!!host.prefer444 !== want444) {
+        void saveHost({ ...host, prefer444: (host.prefer444 = want444) }).then(() => { close(); openSession(host, onClose) })
+      }
+    }
     else if (b.dataset.d) remote.send({ t: 'display', id: b.dataset.d })
     else if (b.dataset.m === 'send') pick.click()
     else if (b.dataset.m === 'pull') { remote.send({ t: 'pull' }); say('Hộp chọn tệp đang mở trên máy chủ — chọn tệp ở đó') }
@@ -506,6 +624,8 @@ export function openSession(host: HostEntry, onClose: () => void) {
     else if (b.dataset.m === 'term') openTerm()
     else if (b.dataset.m === 'game') toggleGame()
     else if (b.dataset.m === 'wol') void showWol()
+    else if (b.dataset.m === 'anno') setAnno(!!anno.hidden)
+    else if (b.dataset.m === 'tcp') showTcp()
   }, sig)
   bar.addEventListener('click', (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>('button')
@@ -552,6 +672,9 @@ export function openSession(host: HostEntry, onClose: () => void) {
   function close() {
     releaseAll()
     rec?.stop()
+    if (!anno.hidden) remote.send({ t: 'anno', close: true })
+    offTcp?.()
+    zp?.tcpCloseAll(tcpSid)
     if (accFrame) cancelAnimationFrame(accFrame)
     if (document.pointerLockElement) document.exitPointerLock()
     if (panel.open) panel.close()
