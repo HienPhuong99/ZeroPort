@@ -27,5 +27,52 @@
     "qrcode-generator": "^2.0.4",
     "typescript": "^7.0.2",
     "vite": "^8.3.8"
+  },
+  "build": {
+    "appId": "io.github.hienphuong99.zeroport",
+    "productName": "ZeroPort",
+    "files": [
+      "dist/**",
+      "electron/**",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/koffi/**",
+      "node_modules/@koromix/**"
+    ],
+    "npmRebuild": false,
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "identity": "-",
+      "hardenedRuntime": false,
+      "notarize": false,
+      "minimumSystemVersion": "13.0",
+      "extendInfo": {
+        "NSAudioCaptureUsageDescription": "ZeroPort streams system audio to your own devices."
+      }
+    },
+    "dmg": {
+      "sign": false
+    }
   }
 }
