@@ -10,3 +10,4 @@ out/
 Thumbs.db
 .claude/
 .playwright-mcp/
+.agents/

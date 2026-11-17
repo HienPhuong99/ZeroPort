@@ -97,7 +97,9 @@
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); overscroll-behavior: none; -webkit-font-smoothing: antialiased; }
+html { background: var(--bg); }
+/* body stays transparent: it is only as tall as its content and would cover the fixed glow layer below it */
+html, body { margin: 0; min-height: 100%; color: var(--text); overscroll-behavior: none; -webkit-font-smoothing: antialiased; }
 html.theme-fade body, html.theme-fade #app, html.theme-fade .card, html.theme-fade button, html.theme-fade input, html.theme-fade dialog {
   transition: background-color 220ms ease, color 220ms ease, border-color 220ms ease;
 }
