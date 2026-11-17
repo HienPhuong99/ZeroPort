@@ -49,7 +49,8 @@ function start() {
   })
   win.webContents.on('did-create-window', (child) => {
     child.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-    child.webContents.on('will-navigate', (e) => e.preventDefault())
+    // The child's first load is itself a navigation: blocking everything left the window blank. Only our own page may load.
+    child.webContents.on('will-navigate', (e, url) => { if (!url.startsWith(baseUrl)) e.preventDefault() })
   })
   win.webContents.on('will-navigate', (e) => e.preventDefault()) // local UI only, never remote content
 
@@ -120,7 +121,9 @@ ipcMain.handle('displays', () => ({
 }))
 
 ipcMain.handle('display:select', (e, id) => {
-  if (mine(e) && screen.getAllDisplays().some((d) => String(d.id) === id)) { selected = id; rect = null }
+  if (!mine(e) || !screen.getAllDisplays().some((d) => String(d.id) === id)) return
+  selected = id; rect = null
+  void sys.annotate({ close: true }) // the overlay sits on the old display; the next stroke reopens it on the new one
 })
 
 // Host identity and pairing secrets, encrypted at rest with the OS keystore (DPAPI / Keychain).
@@ -220,7 +223,8 @@ ipcMain.handle('tcp:ctl:listen', guard((sid, lp, rp) => sys.tcpListen(String(sid
 ipcMain.on('tcp:ctl:unlisten', (e, sid, lp) => { if (mine(e)) sys.tcpUnlisten(String(sid), lp | 0) })
 ipcMain.on('tcp:ctl:send', (e, sid, id, buf) => { if (mine(e)) sys.tcpCtlSend(String(sid), id >>> 0, buf) })
 ipcMain.on('tcp:ctl:drop', (e, sid, id) => { if (mine(e)) sys.tcpCtlDrop(String(sid), id >>> 0) })
-ipcMain.on('tcp:closeAll', (e, sid) => { if (mine(e)) sys.tcpCloseAll(sid ? String(sid) : undefined) })
+ipcMain.on('tcp:closeAll', (e, sid, connsOnly) => { if (mine(e)) sys.tcpCloseAll(sid ? String(sid) : undefined, !!connsOnly) })
+ipcMain.on('tcp:ack', (e, sid, id) => { if (mine(e)) sys.tcpAck(String(sid), id >>> 0) })
 
 // ---- settings ---------------------------------------------------------------------------------
 // Only meaningful for the installed app: in development this would register electron.exe itself.

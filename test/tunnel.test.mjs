@@ -3,7 +3,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { makeTunnel } from '../src/tunnel.ts'
 
-test('makeTunnel frames OPEN, DATA (>16KB split) and CLOSE accurately', () => {
+test('makeTunnel frames OPEN, DATA (>16KB split) and CLOSE accurately', async () => {
   const mk = () => ({ readyState: 'open', binaryType: 'arraybuffer', onmessage: null, send: () => {} })
   const a = mk(), b = mk()
   a.send = (d) => b.onmessage?.({ data: d.buffer.slice(d.byteOffset, d.byteOffset + d.byteLength) })
@@ -19,8 +19,8 @@ test('makeTunnel frames OPEN, DATA (>16KB split) and CLOSE accurately', () => {
 
   tx.open(42, 2222)
   tx.data(42, new Uint8Array(20_000))
-  tx.close(42)
-  rx.close(99) // verify rx channel exists
+  await tx.close(42) // frames go through one ordered queue
+  await rx.close(99) // verify rx channel exists
 
   assert.deepEqual(events, [
     ['open', 42, 2222],

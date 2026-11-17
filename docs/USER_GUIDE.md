@@ -79,7 +79,7 @@ Trên thẻ máy ở **Máy của tôi**:
   - `Nét nhất` (25 Mbps, 60fps)
   - `Mượt` (8 Mbps, 60fps, ưu tiên khung hình)
   - `Tiết kiệm` (1.2 Mbps, 24fps, giảm độ phân giải)
-  - `4:4:4 (AV1/VP9)` (30 Mbps, 60fps, ưu tiên codec AV1/VP9 giữ nét chữ/màu — tự nối lại phiên khi bật/tắt)
+  - `AV1 (chữ nét)` (30 Mbps, 60fps, dùng codec AV1 cho chữ nét hơn; máy chủ mã hoá bằng CPU nên tốn tài nguyên hơn — tự nối lại phiên khi bật/tắt). Lưu ý: đây không phải màu 4:4:4, Chromium chưa mã hoá được 4:4:4.
 - **`🔇` / `🔊`**: bật/tắt âm thanh từ máy host (mặc định tắt tiếng lúc mới vào).
 - **`⛶`**: toàn màn hình (trên trình duyệt máy tính hỗ trợ khoá phím để `Alt+Tab`, `Win`, `Esc` đi thẳng vào máy host).
 - **`ⓘ`**: hiện thông số thời gian thực (độ phân giải, fps, codec, bitrate, ping ms, kết nối trực tiếp hay qua relay).

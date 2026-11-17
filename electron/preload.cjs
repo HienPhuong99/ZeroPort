@@ -39,7 +39,8 @@ contextBridge.exposeInMainWorld('zp', {
   tcpCtlSend: (sid, id, buf) => ipcRenderer.send('tcp:ctl:send', sid, id, buf),
   tcpCtlDrop: (sid, id) => ipcRenderer.send('tcp:ctl:drop', sid, id),
   onTcpCtl: (fn) => { const h = (_e, sid, kind, id, data) => fn(sid, kind, id, data); ipcRenderer.on('tcp:ctl', h); return () => ipcRenderer.removeListener('tcp:ctl', h) },
-  tcpCloseAll: (sid) => ipcRenderer.send('tcp:closeAll', sid),
+  tcpCloseAll: (sid, connsOnly) => ipcRenderer.send('tcp:closeAll', sid, connsOnly),
+  tcpAck: (sid, id) => ipcRenderer.send('tcp:ack', sid, id),
   autostartGet: () => ipcRenderer.invoke('autostart:get'),
   autostartSet: (on) => ipcRenderer.invoke('autostart:set', on),
 })

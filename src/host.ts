@@ -43,6 +43,7 @@ const seenSids = new Map<string, number>()
 /** Devices that passed TOTP recently: a phone reconnecting after a trip to the background is not asked again. */
 const otpGrace = new Map<string, number>()
 const OTP_GRACE_MS = 10 * 60_000
+let lockTimer: ReturnType<typeof setTimeout> | undefined
 let otpFails: number[] = []
 let onChange = () => {}
 
@@ -57,8 +58,11 @@ export async function hostStats() {
   const out: object[] = []
   for (const s of sessions.values()) {
     const row: Record<string, unknown> = { dev: s.dev.name, authed: s.authed, conn: s.pc.connectionState, track: s.video.track?.readyState ?? 'none' }
-    ;(await s.pc.getStats()).forEach((r: any) => {
-      if (r.type === 'outbound-rtp' && r.kind === 'video') Object.assign(row, { sent: r.framesSent, encoded: r.framesEncoded, enc: r.encoderImplementation, limit: r.qualityLimitationReason, w: r.frameWidth, h: r.frameHeight, bytes: r.bytesSent })
+    const report = await s.pc.getStats()
+    report.forEach((r: any) => {
+      if (r.type !== 'outbound-rtp' || r.kind !== 'video') return
+      const codec = report.get(r.codecId)
+      Object.assign(row, { sent: r.framesSent, encoded: r.framesEncoded, enc: r.encoderImplementation, codec: codec?.mimeType, fmtp: codec?.sdpFmtpLine, limit: r.qualityLimitationReason, w: r.frameWidth, h: r.frameHeight, bytes: r.bytesSent })
     })
     out.push(row)
   }
@@ -76,6 +80,8 @@ export async function startHost(changed: () => void) {
     const s = sessions.get(sid)
     if (!s?.authed) return
     if (kind === 'exit') { s.term = false; return tell(s, { t: 'term', exit: data }) }
+    // ponytail: a flood of output (dir /s) is dropped rather than paused once 4 MB is queued; pause the pipe if that matters.
+    if (s.ctl.bufferedAmount > 4 << 20) return
     // One data-channel message must stay well under 256 KB.
     const text = String(data)
     for (let i = 0; i < text.length; i += 16_000) tell(s, { t: 'term', s: text.slice(i, i + 16_000) })
@@ -83,7 +89,7 @@ export async function startHost(changed: () => void) {
   zp.onTcpHost((sid: string, kind: string, id: number, data: unknown) => {
     const s = sessions.get(sid)
     if (!s?.authed || !s.tunnel) return
-    if (kind === 'data') s.tunnel.data(id, data as Uint8Array)
+    if (kind === 'data') void s.tunnel.data(id, data as Uint8Array).then(() => zp.tcpAck(sid, id))
     else if (kind === 'close') s.tunnel.close(id)
   })
   // Free Supabase projects pause after a week without database traffic; Realtime alone may not count.
@@ -212,7 +218,10 @@ function end(s: Session) {
     // Nobody is watching any more: never leave the screen blacked out or the local keyboard frozen.
     if (privacy.privacy) void zp.privacy(false).then((p: typeof privacy) => (privacy = p))
     void zp.annotate({ close: true })
-    if (cfg.lockOnEnd) void zp.power('lock').catch(console.warn)
+    // Delayed: a viewer that only reconnects (network change, wall → full session, codec switch) must not find a
+    // lock screen, which this version cannot control.
+    clearTimeout(lockTimer)
+    if (cfg.lockOnEnd) lockTimer = setTimeout(() => { if (!authed().length) void zp.power('lock').catch(console.warn) }, 8000)
   }
   syncSessions()
 }
@@ -241,7 +250,9 @@ async function onCtl(s: Session, file: RTCDataChannel, m: Ctl) {
     return
   }
   if (INPUT_TYPES.has(m.t)) return input(s, m as Input)
-  if (Object.hasOwn(handlers, m.t)) await handlers[m.t](s, m)
+  if (!Object.hasOwn(handlers, m.t)) return
+  // A failed command (no display to capture, picker error…) is reported, not a reason to drop an authenticated session.
+  try { await handlers[m.t](s, m) } catch (e: any) { console.warn(m.t, e); tell(s, { t: 'note', s: `Lệnh “${m.t}” thất bại: ${e?.message ?? e}` }) }
 }
 
 async function checkOtp(s: Session, file: RTCDataChannel, code: string) {
@@ -322,7 +333,7 @@ const handlers: Record<string, (s: Session, m: Ctl) => unknown> = {
     tellAll({ t: 'state', ...privacy })
   },
   async term(s, m) {
-    if (m.open) { await zp.termOpen(s.sid); s.term = true }
+    if (m.open) { s.term = true; await zp.termOpen(s.sid) } // flag first: input sent right behind `open` must not be dropped
     else if (m.close) { zp.termClose(s.sid); s.term = false }
     else if (s.term && typeof m.s === 'string') zp.termWrite(s.sid, m.s.slice(0, 64_000))
   },

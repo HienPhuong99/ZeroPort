@@ -2,7 +2,7 @@
 import type { Keys } from './proto'
 
 /** `macs`: the host's network adapters as it last reported them, for Wake-on-LAN through another host. */
-export interface HostEntry { hostId: string; devId: string; name: string; keys: Keys; added: number; macs?: string[]; prefer444?: boolean }
+export interface HostEntry { hostId: string; devId: string; name: string; keys: Keys; added: number; macs?: string[]; /** AV1 instead of H.264 (historic name). */ prefer444?: boolean }
 
 const db = new Promise<IDBDatabase>((res, rej) => {
   const r = indexedDB.open('zeroport', 1)

@@ -20,6 +20,8 @@ export function makeTransfer(ch: RTCDataChannel, open: (name: string, size: numb
       rx = null
     })
   }
+  // The connection died mid-file: release the handle and delete the partial file.
+  ch.addEventListener('close', () => { chain = chain.then(async () => { await rx?.sink.close(false).catch(() => {}); rx = null }) })
   async function onMsg(data: string | ArrayBuffer) {
     if (typeof data === 'string') {
       if (rx) await rx.sink.close(false) // the sender started over

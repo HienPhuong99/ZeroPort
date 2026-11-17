@@ -63,6 +63,9 @@ export function kill(pid) {
 // ---- privacy mode -----------------------------------------------------------------------------
 // A black, click-through window on every display, excluded from capture (WDA_EXCLUDEFROMCAPTURE on Windows 10 2004+,
 // NSWindowSharingNone on macOS), so people at the machine see black while the viewer still sees the desktop.
+// Measured on Windows 10 22H2: click-through makes the window layered, and a layered window only accepts the
+// capture exclusion after SetLayeredWindowAttributes — without it the affinity silently stays 0 and the viewer
+// gets the black veil too. Hence the explicit call and the read-back check below.
 // BlockInput additionally freezes the local mouse/keyboard, but Windows only allows it from an elevated process;
 // injected input from this thread still goes through. Ctrl+Alt+Del always releases it.
 let veils = [], blocked = false
@@ -78,7 +81,6 @@ export function privacy(on) {
       ...d.bounds, frame: false, show: false, focusable: false, skipTaskbar: true, resizable: false, movable: false,
       backgroundColor: '#000000', hasShadow: false, enableLargerThanScreen: true, webPreferences: { javascript: false },
     })
-    w.setContentProtection(true)
     w.setIgnoreMouseEvents(true)
     w.setAlwaysOnTop(true, 'screen-saver')
     if (mac) w.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
@@ -86,6 +88,14 @@ export function privacy(on) {
     w.showInactive()
     w.setBounds(d.bounds)
     veils.push(w)
+    const hwnd = win32 && w.getNativeWindowHandle().readBigInt64LE()
+    if (win32) u32().func('bool SetLayeredWindowAttributes(intptr hwnd, uint32_t key, uint8_t alpha, uint32_t flags)')(hwnd, 0, 255, 2 /* LWA_ALPHA */)
+    w.setContentProtection(true)
+    const aff = [0]
+    if (win32 && !(u32().func('bool GetWindowDisplayAffinity(intptr hwnd, _Out_ uint32_t *aff)')(hwnd, aff) && aff[0] === 0x11)) {
+      privacy(false) // a veil that is captured would blind the viewer: refuse rather than black out both sides
+      throw new Error('Windows này không loại được cửa sổ che khỏi luồng quay màn hình (cần Windows 10 2004 trở lên)')
+    }
   }
   if (win32) blocked = !!u32().func('bool BlockInput(bool)')(true)
   return { privacy: true, blocked }
@@ -163,11 +173,13 @@ export async function wake(list) {
 let annoWin = null, annoReady = null
 const ANNO_COLORS = new Set(['#ef4444', '#3b82f6', '#22c55e', '#facc15'])
 const ANNO_HTML = 'data:text/html;charset=utf-8,' + encodeURIComponent(`<!doctype html><body style="margin:0;overflow:hidden;background:transparent"><canvas id="c" style="width:100vw;height:100vh;display:block"></canvas><script>
-const c=document.getElementById('c'),g=c.getContext('2d');
-function fit(){c.width=innerWidth*devicePixelRatio;c.height=innerHeight*devicePixelRatio;g.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0)}
+const c=document.getElementById('c'),g=c.getContext('2d'),S=[];
+function line(pts,col){g.strokeStyle=col;g.lineWidth=4;g.lineCap='round';g.lineJoin='round';g.beginPath();g.moveTo(pts[0][0]*innerWidth,pts[0][1]*innerHeight);for(let i=1;i<pts.length;i++)g.lineTo(pts[i][0]*innerWidth,pts[i][1]*innerHeight);g.stroke()}
+// Resizing a canvas wipes it, and the first resize arrives after the first stroke (the window is sized while it is shown): keep the strokes and repaint.
+function fit(){c.width=innerWidth*devicePixelRatio;c.height=innerHeight*devicePixelRatio;g.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);S.forEach(s=>line(s[0],s[1]))}
 fit();addEventListener('resize',fit);
-window.draw=(pts,col)=>{if(pts.length<2)return;g.strokeStyle=col;g.lineWidth=4;g.lineCap='round';g.lineJoin='round';g.beginPath();g.moveTo(pts[0][0]*innerWidth,pts[0][1]*innerHeight);for(let i=1;i<pts.length;i++)g.lineTo(pts[i][0]*innerWidth,pts[i][1]*innerHeight);g.stroke()};
-window.clr=()=>g.clearRect(0,0,innerWidth,innerHeight);
+window.draw=(pts,col)=>{if(pts.length<2)return;if(S.push([pts,col])>4000)S.shift();line(pts,col)};
+window.clr=()=>{S.length=0;g.clearRect(0,0,innerWidth,innerHeight)};
 </script></body>`)
 
 export async function annotate(msg, bounds) {
@@ -182,7 +194,7 @@ export async function annotate(msg, bounds) {
       resizable: false, movable: false, hasShadow: false, enableLargerThanScreen: true,
       webPreferences: { contextIsolation: true, sandbox: true },
     })
-    annoWin.setContentProtection(true)
+    // Deliberately captured: viewers see the strokes in the video, screenshots and recordings like the person at the machine does.
     annoWin.setIgnoreMouseEvents(true)
     annoWin.setAlwaysOnTop(true, 'screen-saver')
     if (mac) annoWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
@@ -193,6 +205,8 @@ export async function annotate(msg, bounds) {
 }
 
 // ---- TCP port forwarding (P2, strictly loopback 127.0.0.1) ------------------------------------
+// One TCP connection = one id on the tunnel (src/tunnel.ts). A CLOSE frame means "this side has sent everything":
+// the peer finishes its writes and half-closes, so data still travelling the other way is never cut off.
 const tcpServers = new Map() // `${sid}:${localPort}` -> { server, sid, localPort, remotePort }
 const tcpHostConns = new Map() // `${sid}:${id}` -> net.Socket
 const tcpCtlConns = new Map() // `${sid}:${id}` -> net.Socket
@@ -200,31 +214,39 @@ let nextTcpId = 1
 
 const validPort = (p) => Number.isInteger(p) && p >= 1 && p <= 65535
 
-export function tcpHostOpen(sid, id, port, emit) {
-  if (!validPort(port) || tcpHostConns.size >= 64) return emit('close', id)
-  const key = `${sid}:${id}`
-  const sock = net.createConnection({ host: '127.0.0.1', port })
-  tcpHostConns.set(key, sock)
-  sock.on('data', (buf) => emit('data', id, buf))
+function wire(map, key, sock, id, emit) {
+  map.set(key, sock)
+  let eof = false
+  const fin = () => { if (!eof) { eof = true; emit('close', id) } }
+  // Flow control: stop reading until the renderer has put this chunk on the data channel and calls tcpAck.
+  sock.on('data', (buf) => { sock.pause(); emit('data', id, buf) })
+  sock.on('end', fin)
   sock.on('error', () => {})
-  sock.on('close', () => { if (tcpHostConns.delete(key)) emit('close', id) })
+  sock.on('close', () => { map.delete(key); fin() })
 }
+export const tcpAck = (sid, id) => { const k = `${sid}:${id}`; (tcpHostConns.get(k) ?? tcpCtlConns.get(k))?.resume() }
+
+export function tcpHostOpen(sid, id, port, emit) {
+  const key = `${sid}:${id}`
+  if (tcpHostConns.has(key)) return
+  if (!validPort(port) || tcpHostConns.size >= 64) return emit('close', id)
+  wire(tcpHostConns, key, net.createConnection({ host: '127.0.0.1', port, allowHalfOpen: true }), id, emit)
+}
+// ponytail: writes are not flow-controlled — if the local program stops reading, Node buffers what the network
+// delivers. Add a per-connection window (credit frames) if tunnels ever carry bulk data to slow consumers.
 export const tcpHostSend = (sid, id, buf) => { tcpHostConns.get(`${sid}:${id}`)?.write(Buffer.from(buf)) }
-export const tcpHostDrop = (sid, id) => { const k = `${sid}:${id}`; tcpHostConns.get(k)?.destroy(); tcpHostConns.delete(k) }
+export const tcpHostDrop = (sid, id) => { tcpHostConns.get(`${sid}:${id}`)?.end() }
 
 export async function tcpListen(sid, localPort, remotePort, emit) {
   if (!validPort(localPort) || !validPort(remotePort)) throw new Error('Cổng không hợp lệ (1–65535)')
   const skey = `${sid}:${localPort}`
   if (tcpServers.has(skey)) throw new Error(`Cổng ${localPort} đã được chuyển tiếp`)
   if (tcpServers.size >= 10) throw new Error('Tối đa 10 cổng chuyển tiếp')
-  const server = net.createServer((sock) => {
+  const server = net.createServer({ allowHalfOpen: true }, (sock) => {
     if (tcpCtlConns.size >= 64) return sock.destroy()
-    const id = nextTcpId++ >>> 0, ckey = `${sid}:${id}`
-    tcpCtlConns.set(ckey, sock)
+    const id = nextTcpId++ >>> 0
     emit('open', id, remotePort)
-    sock.on('data', (buf) => emit('data', id, buf))
-    sock.on('error', () => {})
-    sock.on('close', () => { if (tcpCtlConns.delete(ckey)) emit('close', id) })
+    wire(tcpCtlConns, `${sid}:${id}`, sock, id, emit)
   })
   await new Promise((res, rej) => {
     server.once('error', rej)
@@ -238,11 +260,11 @@ export function tcpUnlisten(sid, localPort) {
   if (entry) { tcpServers.delete(k); entry.server.close() }
 }
 export const tcpCtlSend = (sid, id, buf) => { tcpCtlConns.get(`${sid}:${id}`)?.write(Buffer.from(buf)) }
-export const tcpCtlDrop = (sid, id) => { const k = `${sid}:${id}`; tcpCtlConns.get(k)?.destroy(); tcpCtlConns.delete(k) }
+export const tcpCtlDrop = (sid, id) => { tcpCtlConns.get(`${sid}:${id}`)?.end() }
 
-export function tcpCloseAll(sid) {
-  for (const [k, v] of tcpServers) if (!sid || v.sid === sid) { v.server.close(); tcpServers.delete(k) }
+/** `connsOnly` keeps the listeners: used when a session reconnects and the old connections are dead on the far side. */
+export function tcpCloseAll(sid, connsOnly = false) {
+  if (!connsOnly) for (const [k, v] of tcpServers) if (!sid || v.sid === sid) { v.server.close(); tcpServers.delete(k) }
   for (const [k, s] of tcpHostConns) if (!sid || k.startsWith(`${sid}:`)) { s.destroy(); tcpHostConns.delete(k) }
   for (const [k, s] of tcpCtlConns) if (!sid || k.startsWith(`${sid}:`)) { s.destroy(); tcpCtlConns.delete(k) }
 }
-

@@ -150,16 +150,22 @@ export function connect(host: HostEntry, on: Events): Remote {
   }
 }
 
-/** The sender uses the first codec in our answer. Default H.264 (hardware decode); 4:4:4 mode prefers AV1/VP9 profile 1+. */
+/**
+ * The sender uses the first codec in our answer. Default H.264 (hardware encode and decode); `prefer444` asks for AV1.
+ * Measured on Electron 45: the sender offers only AV1 profile 0 and VP9 profiles 0/2, i.e. 4:2:0 — real 4:4:4 is
+ * decodable but not encodable, so this mode is sold as "AV1", not "4:4:4". The full-chroma profiles stay ranked
+ * first so a future build that can encode them is picked up without a code change.
+ */
 function preferCodecs(pc: RTCPeerConnection, prefer444: boolean) {
   const tx = pc.getTransceivers().find((t) => t.receiver.track.kind === 'video')
   const caps = RTCRtpReceiver.getCapabilities?.('video')?.codecs
   if (!tx?.setCodecPreferences || !caps) return
   const order = prefer444 ? ['video/av1', 'video/vp9', 'video/h264', 'video/vp8'] : ['video/h264', 'video/av1', 'video/vp9', 'video/vp8']
   const rank = (c: { mimeType: string; sdpFmtpLine?: string }) => {
-    const base = (order.indexOf(c.mimeType.toLowerCase()) >>> 0) * 10
-    if (prefer444 && c.mimeType.toLowerCase() === 'video/vp9' && /profile-id=[12]/.test(c.sdpFmtpLine ?? '')) return base - 1
-    return base
+    const mime = c.mimeType.toLowerCase(), fmtp = c.sdpFmtpLine ?? ''
+    // Only these profiles carry full chroma: AV1 High (profile=1), VP9 profile 1 (8-bit) and 3 (10-bit).
+    if (prefer444 && ((mime === 'video/av1' && /(^|;)profile=1/.test(fmtp)) || (mime === 'video/vp9' && /profile-id=[13]/.test(fmtp)))) return -1
+    return order.indexOf(mime) >>> 0
   }
   try { tx.setCodecPreferences([...caps].sort((a, b) => rank(a) - rank(b))) } catch { /* keep browser default */ }
 }

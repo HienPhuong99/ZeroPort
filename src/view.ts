@@ -15,8 +15,11 @@ const QUALITY: Record<string, object> = {
   'Nét nhất': { kbps: 25000, fps: 60 },
   'Mượt': { kbps: 8000, fps: 60, smooth: true },
   'Tiết kiệm': { kbps: 1200, fps: 24, scale: 1.5, smooth: true },
-  '4:4:4 (AV1/VP9)': { kbps: 30000, fps: 60 },
+  'AV1 (chữ nét)': { kbps: 30000, fps: 60 },
 }
+// AV1 keeps small text sharper than H.264 at the same bitrate, at the price of software encoding on the host.
+// The flag is still called prefer444: the mode was first labelled 4:4:4, which this Chromium cannot encode (see controller.ts).
+const QAV1 = 'AV1 (chữ nét)'
 const KEYS: [string, string[]][] = [
   ['Esc', ['Escape']], ['Tab', ['Tab']], ['Del', ['Delete']], ['Win', ['MetaLeft']],
   ['←', ['ArrowLeft']], ['↑', ['ArrowUp']], ['↓', ['ArrowDown']], ['→', ['ArrowRight']],
@@ -42,7 +45,7 @@ const POWER: [string, string, string][] = [
 ]
 const stamp = () => new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
 
-export function openSession(host: HostEntry, onClose: () => void) {
+export function openSession(host: HostEntry, onClose: () => void, qName = host.prefer444 ? QAV1 : '') {
   root.hidden = false
   root.innerHTML = `
     <div id="stage"><video autoplay playsinline muted disablepictureinpicture></video><canvas id="anno" hidden></canvas></div>
@@ -94,7 +97,7 @@ export function openSession(host: HostEntry, onClose: () => void) {
   const offTcp = zp?.onTcpCtl((sid: string, kind: string, id: number, data: unknown) => {
     if (sid !== tcpSid || !tunnel) return
     if (kind === 'open') tunnel.open(id, data as number)
-    else if (kind === 'data') tunnel.data(id, data as Uint8Array)
+    else if (kind === 'data') void tunnel.data(id, data as Uint8Array).then(() => zp.tcpAck(tcpSid, id))
     else if (kind === 'close') tunnel.close(id)
   })
 
@@ -128,7 +131,11 @@ export function openSession(host: HostEntry, onClose: () => void) {
   $('#otpno').addEventListener('click', () => close(), sig)
 
   const remote: Remote = connect(host, {
-    state(s, detail) { conn = s; connDetail = detail ?? ''; paintVeil() },
+    state(s, detail) {
+      conn = s; connDetail = detail ?? ''; paintVeil()
+      // Every (re)connection is a new session on the host and starts at its default quality.
+      if (s === 'connected' && qName) remote.send({ t: 'quality', ...QUALITY[qName] })
+    },
     stream(s) { if (video.srcObject !== s) video.srcObject = s; void video.play().catch(() => {}) },
     file(ch) {
       files = makeTransfer(ch, (name) => openSink(name), (dir, name, done, size) => {
@@ -138,6 +145,7 @@ export function openSession(host: HostEntry, onClose: () => void) {
     },
     tcp(ch) {
       if (!zp) return
+      zp.tcpCloseAll(tcpSid, true) // connections of the previous link are gone on the host; listeners stay
       tunnel = makeTunnel(ch, {
         onData: (id, bytes) => zp.tcpCtlSend(tcpSid, id, bytes),
         onClose: (id) => zp.tcpCtlDrop(tcpSid, id),
@@ -145,7 +153,10 @@ export function openSession(host: HostEntry, onClose: () => void) {
     },
     ctl(m: Ctl) {
       if (m.t === 'state') {
-        if (m.displays) { displays = m.displays; display = m.display; $('[data-a=screen]').hidden = displays.length < 2 }
+        if (m.displays) {
+          if (display && m.display !== display) annoCtx.clearRect(0, 0, anno.width, anno.height) // strokes belonged to the other screen
+          displays = m.displays; display = m.display; $('[data-a=screen]').hidden = displays.length < 2
+        }
         if (typeof m.locked === 'boolean') { hostLocked = m.locked; paintVeil() }
         if (typeof m.platform === 'string') platform = m.platform
         if (typeof m.privacy === 'boolean' && m.privacy !== privacyOn) {
@@ -234,7 +245,7 @@ export function openSession(host: HostEntry, onClose: () => void) {
   }, sig)
   stage.addEventListener('pointerdown', (e) => {
     if (e.pointerType === 'touch') return touchDown(e)
-    stage.setPointerCapture(e.pointerId)
+    if (!game) stage.setPointerCapture(e.pointerId) // throws while the pointer is locked, which would swallow the click
     if (!game) { const p = norm(e); remote.send({ t: 'mm', x: p.x, y: p.y }) } // reliable channel, so the click cannot outrun the move
     if (e.button <= 2) remote.send({ t: 'mb', b: e.button as 0 | 1 | 2, d: 1 })
   }, sig)
@@ -425,7 +436,7 @@ export function openSession(host: HostEntry, onClose: () => void) {
         <span>Thời gian bật</span><span>${fmtUp(m.uptime)}</span>
       </div>
       <div class="proclist"><table><thead><tr><th>Tiến trình</th><th>PID</th><th>RAM</th><th></th></tr></thead><tbody>
-        ${procs.map((p) => `<tr><td>${esc(p.name)}</td><td>${p.pid}</td><td>${p.mb} MB</td><td><button data-kill="${p.pid}" class="danger sm">Dừng</button></td></tr>`).join('')}
+        ${procs.map((p) => `<tr><td>${esc(p.name)}</td><td>${esc(p.pid)}</td><td>${esc(p.mb)} MB</td><td><button data-kill="${esc(p.pid)}" class="danger sm">Dừng</button></td></tr>`).join('')}
       </tbody></table></div>
       <div class="row" style="justify-content:flex-end;margin-top:12px">
         <button id="iref">Làm mới</button><button class="primary" id="iclose">Đóng</button>
@@ -581,10 +592,9 @@ export function openSession(host: HostEntry, onClose: () => void) {
         KEYS.map(([l], i) => `<button data-key="${i}">${l}</button>`).join('')
       paintMods()
     } else if (kind === 'quality') menu.innerHTML = Object.keys(QUALITY).map((q) => {
-      const on = q.startsWith('4:4:4') && host.prefer444 ? ' class="on"' : ''
-      return `<button data-q="${q}"${on}>${q}</button>`
+      return `<button data-q="${q}"${q === (qName || 'Cân bằng') ? ' class="on"' : ''}>${q}</button>`
     }).join('')
-    else if (kind === 'screen') menu.innerHTML = displays.map((d) => `<button data-d="${d.id}" class="${d.id === display ? 'on' : ''}">${d.label}</button>`).join('')
+    else if (kind === 'screen') menu.innerHTML = displays.map((d) => `<button data-d="${esc(d.id)}" class="${d.id === display ? 'on' : ''}">${esc(d.label)}</button>`).join('')
     else if (kind === 'more') menu.innerHTML = MORE.map(([a, l]) => {
       const label = a === 'rec' && rec ? 'Dừng ghi' : a === 'privacy' && privacyOn ? 'Tắt chế độ riêng tư' : a === 'game' && game ? 'Tắt chuột game' : l
       return `<button data-m="${a}" class="span2">${label}</button>`
@@ -605,10 +615,11 @@ export function openSession(host: HostEntry, onClose: () => void) {
     if (b.dataset.key) { combo(KEYS[+b.dataset.key][1]); if (sticky.size) releaseAll(); return }
     menu.hidden = true
     if (b.dataset.q) {
-      const want444 = b.dataset.q.startsWith('4:4:4')
-      remote.send({ t: 'quality', ...QUALITY[b.dataset.q] })
-      if (!!host.prefer444 !== want444) {
-        void saveHost({ ...host, prefer444: (host.prefer444 = want444) }).then(() => { close(); openSession(host, onClose) })
+      const wantAv1 = (qName = b.dataset.q) === QAV1
+      remote.send({ t: 'quality', ...QUALITY[qName] })
+      // The codec is fixed when the connection is negotiated, so switching AV1 on or off means reconnecting.
+      if (!!host.prefer444 !== wantAv1) {
+        void saveHost({ ...host, prefer444: (host.prefer444 = wantAv1) }).then(() => { close(); openSession(host, onClose, qName) })
       }
     }
     else if (b.dataset.d) remote.send({ t: 'display', id: b.dataset.d })

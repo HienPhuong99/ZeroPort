@@ -101,7 +101,7 @@ Không giới hạn thiết bị, số phiên, thời gian phiên; không quản
 | 23 | APK Android | — | Capacitor, build trên GitHub Actions | ☑ |
 
 ### P2 — nâng cao
-- ☑ **Màu 4:4:4 (AV1 / VP9 profile 1+)**: tuỳ chọn codec trong menu Chất lượng.
+- ☑ **Codec AV1 (chữ nét hơn H.264)**: tuỳ chọn trong menu Chất lượng. Màu 4:4:4 thật **không làm được**: Chromium/Electron 45 chỉ giải mã chứ không mã hoá được AV1 profile 1 / VP9 profile 1 (đã đo bằng `RTCRtpSender.getCapabilities`).
 - ☑ **Tường màn hình**: lưới xem nhiều máy cùng lúc, bấm để điều khiển.
 - ☑ **Chuyển tiếp cổng TCP (chỉ controller Electron)**: chuyển tiếp loopback `127.0.0.1` qua data channel.
 - ☑ **Bảng vẽ chú thích**: vẽ lên màn hình từ xa với lớp phủ click-through trên host.
@@ -120,8 +120,8 @@ Không giới hạn thiết bị, số phiên, thời gian phiên; không quản
 2. **M1** ✔ Lõi: giao thức, mã hoá, signaling; host chụp màn hình + bơm input; controller xem + điều khiển; test trên máy này.
 3. **M2** ✔ (code xong; âm thanh, đa màn hình, cảm ứng chưa test trên thiết bị thật) P0 còn lại: clipboard, file, đa màn hình, âm thanh, preset chất lượng, UX mobile.
 4. **M3** ✔ CI: deploy controller lên GitHub Pages; build installer Windows + DMG macOS; phát hành.
-5. **M4** ✔ (code xong; phần UI/tuỳ chọn nguồn/chế độ riêng tư/chuột game chưa test end-to-end qua WebRTC) P1: ghi hình, chế độ riêng tư, terminal, WoL, TOTP…
-6. **M5** ✔ APK Android (Capacitor + CI); review & gia cố bảo mật (CSP, kiểm tra replay/overflow/đường dẫn tệp/loopback TCP); P2 (4:4:4, tường màn hình, chuyển tiếp cổng TCP, bảng vẽ chú thích).
+5. **M4** ✔ (đã test end-to-end qua WebRTC bằng `npm run e2e`: thông tin hệ thống, terminal, chế độ riêng tư, bảng vẽ, chuyển tiếp cổng TCP, codec AV1, cửa sổ phiên thứ hai; chưa test tự động: chuột game, TOTP qua giao diện, lấy tệp từ máy chủ, tường màn hình) P1: ghi hình, chế độ riêng tư, terminal, WoL, TOTP…
+6. **M5** ✔ APK Android (Capacitor + CI); review & gia cố bảo mật (CSP, kiểm tra replay/overflow/đường dẫn tệp/loopback TCP); P2 (codec AV1, tường màn hình, chuyển tiếp cổng TCP, bảng vẽ chú thích).
 
 ## 6. Việc chỉ chủ máy làm được (không chặn tiến độ)
 
