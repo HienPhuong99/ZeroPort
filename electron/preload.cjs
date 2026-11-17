@@ -41,6 +41,9 @@ contextBridge.exposeInMainWorld('zp', {
   onTcpCtl: (fn) => { const h = (_e, sid, kind, id, data) => fn(sid, kind, id, data); ipcRenderer.on('tcp:ctl', h); return () => ipcRenderer.removeListener('tcp:ctl', h) },
   tcpCloseAll: (sid, connsOnly) => ipcRenderer.send('tcp:closeAll', sid, connsOnly),
   tcpAck: (sid, id) => ipcRenderer.send('tcp:ack', sid, id),
-  autostartGet: () => ipcRenderer.invoke('autostart:get'),
+  notify: (body) => ipcRenderer.send('notify', body),
+  updateCheck: () => ipcRenderer.invoke('update:check'),
+  updateInstall: () => ipcRenderer.invoke('update:install'),
+  autostartGet:() => ipcRenderer.invoke('autostart:get'),
   autostartSet: (on) => ipcRenderer.invoke('autostart:set', on),
 })

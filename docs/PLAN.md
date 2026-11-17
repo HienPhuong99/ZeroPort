@@ -122,6 +122,7 @@ Không giới hạn thiết bị, số phiên, thời gian phiên; không quản
 4. **M3** ✔ CI: deploy controller lên GitHub Pages; build installer Windows + DMG macOS; phát hành.
 5. **M4** ✔ (đã test end-to-end qua WebRTC bằng `npm run e2e`: thông tin hệ thống, terminal, chế độ riêng tư, bảng vẽ, chuyển tiếp cổng TCP, codec AV1, cửa sổ phiên thứ hai; chưa test tự động: chuột game, TOTP qua giao diện, lấy tệp từ máy chủ, tường màn hình) P1: ghi hình, chế độ riêng tư, terminal, WoL, TOTP…
 6. **M5** ✔ APK Android (Capacitor + CI); review & gia cố bảo mật (CSP, kiểm tra replay/overflow/đường dẫn tệp/loopback TCP); P2 (codec AV1, tường màn hình, chuyển tiếp cổng TCP, bảng vẽ chú thích).
+7. **M6** ✔ (2026-11-17) Vận hành từ xa: cập nhật host từ xa (Windows) và lịch sử/thông báo kết nối — xem §7.
 
 ## 6. Việc chỉ chủ máy làm được (không chặn tiến độ)
 
@@ -130,3 +131,17 @@ Không giới hạn thiết bị, số phiên, thời gian phiên; không quản
 - **Windows không người**: tự quyết định auto-logon / không khoá máy.
 - **Ghép cặp**: quét QR trên màn hình host một lần cho mỗi thiết bị điều khiển.
 - **Sao lưu khoá ký APK Android**: khoá nằm ở `%USERPROFILE%\.zeroport\` trên máy đã tạo (`zeroport-release.jks` + `keystore-password.txt`) và trong GitHub Secrets (`ANDROID_KEYSTORE_B64`, `ANDROID_KEYSTORE_PASSWORD`). Secrets không đọc lại được, nên thư mục kia là bản duy nhất lấy ra được — chép sang nơi an toàn (trình quản lý mật khẩu / ổ ngoài). Mất khoá = bản APK sau không cài đè được bản trước. Không bao giờ commit hai tệp này.
+
+## 7. M6 — vận hành từ xa (đề xuất & làm 2026-11-17)
+
+Sau M5 app đã đủ tính năng; hai chỗ hụt khi máy host nằm ở nơi khác:
+
+| # | Vấn đề | Cách làm | Trạng thái |
+|---|---|---|---|
+| 24 | Có bản mới thì phải tới tận máy host để cài | `electron/update.js`: hỏi GitHub Releases (cố định repo này, cache 1 giờ), tải `ZeroPort.Setup.x.y.z.exe`, đối chiếu `digest` SHA-256 GitHub công bố, rồi một `cmd` tách rời chạy bộ cài `/S --updated` và mở lại `ZeroPort.exe --hidden`. Người điều khiển chỉ gửi được lệnh `update`, không gửi được URL/tệp. Nút ở menu *Thêm* (controller) và ở thẻ *Máy này* (host). Chỉ Windows; Mac ký ad-hoc nên phải cài tay | ☑ (đã thử thật: bản đóng giả 0.2.2 tự lên 0.2.3 và mở lại sau ~40 s) |
+| 25 | Không biết ai đã vào máy, lúc nào | `cfg.log` (50 dòng, mã hoá cùng cấu hình) + thông báo hệ điều hành khi có thiết bị vào; nối lại trong 1 phút tính là cùng lần | ☑ (e2e kiểm dòng “đang kết nối”) |
+
+Ghi chú kỹ thuật (đo trên máy thật):
+- `--force-run` của bộ cài NSIS (electron-builder, `ExecShellAsUser`) **không** mở lại app ở chế độ im lặng — kể cả khi chạy tay. Vì vậy ZeroPort tự mở lại.
+- PowerShell sinh với `detached` (không có console) không chạy lệnh nào; `cmd.exe` thì chạy được.
+- Sửa kèm: sự kiện `close` của panel trước (Thông tin hệ thống) đến trễ sau khi panel đã mở lại thành Terminal → controller tưởng terminal bị đóng và giết shell mới. Đây là nguyên nhân e2e bước “Mở lại” hỏng ~50%; giờ bỏ qua `close` khi panel đang mở.

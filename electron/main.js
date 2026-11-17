@@ -1,12 +1,13 @@
 // Electron main process: window + tray, screen-capture source selection, input injection, encrypted config.
 // The renderer (src/) does all networking and WebRTC; this process only does what a web page cannot.
-import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, session, desktopCapturer, screen, safeStorage, powerSaveBlocker, powerMonitor, clipboard, dialog } from 'electron'
+import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, session, desktopCapturer, screen, safeStorage, powerSaveBlocker, powerMonitor, clipboard, dialog, Notification } from 'electron'
 import { readFile, writeFile, rename, mkdir, open, unlink, stat } from 'node:fs/promises'
 import { join, dirname, basename, parse } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import os from 'node:os'
 import { inject } from './input.js'
 import * as sys from './system.js'
+import * as upd from './update.js'
 
 const dir = dirname(fileURLToPath(import.meta.url))
 const dev = process.argv.includes('--dev')
@@ -225,6 +226,16 @@ ipcMain.on('tcp:ctl:send', (e, sid, id, buf) => { if (mine(e)) sys.tcpCtlSend(St
 ipcMain.on('tcp:ctl:drop', (e, sid, id) => { if (mine(e)) sys.tcpCtlDrop(String(sid), id >>> 0) })
 ipcMain.on('tcp:closeAll', (e, sid, connsOnly) => { if (mine(e)) sys.tcpCloseAll(sid ? String(sid) : undefined, !!connsOnly) })
 ipcMain.on('tcp:ack', (e, sid, id) => { if (mine(e)) sys.tcpAck(String(sid), id >>> 0) })
+
+// ---- notifications, self-update ---------------------------------------------------------------
+ipcMain.on('notify', (e, body) => { if (mine(e) && Notification.isSupported()) new Notification({ title: 'ZeroPort', body: String(body).slice(0, 200) }).show() })
+ipcMain.handle('update:check', guard(() => upd.check(app.getVersion(), app.isPackaged)))
+ipcMain.handle('update:install', guard(async () => {
+  if (process.platform !== 'win32' || !app.isPackaged) throw new Error('Tự cập nhật chỉ có ở bản cài Windows — trên Mac hãy tải DMG mới')
+  const v = await upd.install(app.getVersion())
+  setTimeout(() => app.quit(), 1500) // let the renderer tell viewers first; the installer waits for us to exit
+  return v
+}))
 
 // ---- settings ---------------------------------------------------------------------------------
 // Only meaningful for the installed app: in development this would register electron.exe itself.

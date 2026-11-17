@@ -16,7 +16,12 @@ export interface HostCfg {
   totp?: { secret: string; last: number }
   /** Lock the workstation when the last viewer leaves. */
   lockOnEnd?: boolean
+  /** Newest first, at most LOG_MAX: who was in control and when (`to` unset while still connected). */
+  log?: LogEntry[]
 }
+export interface LogEntry { devId: string; dev: string; from: number; to?: number }
+export interface UpdateInfo { current: string; latest: string; available: boolean; auto: boolean }
+const LOG_MAX = 50
 
 interface Session {
   sid: string; dev: Device; keys: Keys; pc: RTCPeerConnection; ctl: RTCDataChannel
@@ -27,6 +32,7 @@ interface Session {
   term?: boolean
   tcpCh?: RTCDataChannel
   tunnel?: ReturnType<typeof makeTunnel>
+  log?: LogEntry
 }
 
 const zp = (window as any).zp
@@ -46,8 +52,10 @@ const OTP_GRACE_MS = 10 * 60_000
 let lockTimer: ReturnType<typeof setTimeout> | undefined
 let otpFails: number[] = []
 let onChange = () => {}
+let update: UpdateInfo | null = null
 
 export const hostCfg = () => cfg
+export const updateInfo = () => update
 const authed = () => [...sessions.values()].filter((s) => s.authed)
 export const activeSessions = () => authed().map((s) => s.dev.name)
 const tell = (s: Session, m: Ctl) => { if (s.ctl.readyState === 'open') s.ctl.send(JSON.stringify(m)) }
@@ -72,6 +80,7 @@ export async function hostStats() {
 export async function startHost(changed: () => void) {
   onChange = changed
   cfg = (await zp.cfgGet()) ?? { hostId: b64(rand(16)), name: await zp.hostname(), devices: [] }
+  cfg.log?.forEach((e) => (e.to ??= 0)) // still open from before a crash/quit: end time unknown
   await zp.cfgSet(cfg)
   sig = link(cfg.hostId, { name: cfg.name })
   sig.onMsg((env) => void onSignal(env).catch(console.error))
@@ -93,9 +102,22 @@ export async function startHost(changed: () => void) {
     else if (kind === 'close') s.tunnel.close(id)
   })
   // Free Supabase projects pause after a week without database traffic; Realtime alone may not count.
-  const ping = () => void supa.rpc('ping')
+  const ping = () => { void supa.rpc('ping'); void checkUpdate() }
   ping()
   setInterval(ping, 6 * 3600_000)
+}
+
+async function checkUpdate() {
+  try { update = await zp.updateCheck() } catch (e) { console.warn('update check', e); return }
+  onChange()
+  if (update?.available) tellAll({ t: 'state', update })
+}
+
+/** Downloads and starts the new installer; ZeroPort quits and the installer starts it again (Windows only). */
+export async function installUpdate() {
+  tellAll({ t: 'note', s: `Máy chủ đang tải bản ${update?.latest ?? 'mới'}…` })
+  const v: string = await zp.updateInstall()
+  tellAll({ t: 'note', s: `Đang cài ZeroPort ${v} — máy chủ sẽ ngắt khoảng 1 phút rồi tự kết nối lại`, ms: 15_000 })
 }
 
 async function save() { await zp.cfgSet(cfg); onChange() }
@@ -212,6 +234,7 @@ function end(s: Session) {
   if (s.term) zp.termClose(s.sid)
   if (s.tunnel) zp.tcpCloseAll(s.sid)
   if (s.authed && cfg.totp) otpGrace.set(s.dev.devId, Date.now() + OTP_GRACE_MS)
+  if (s.log && !authed().some((o) => o.log === s.log)) { s.log.to = Date.now(); void save() }
   s.pc.close()
   if (!sessions.size && capture) { capture.getTracks().forEach((t) => t.stop()); capture = null }
   if (s.authed && !authed().length) {
@@ -278,6 +301,7 @@ async function checkOtp(s: Session, file: RTCDataChannel, code: string) {
 async function admit(s: Session, file: RTCDataChannel) {
   s.authed = true
   s.dev.seen = Date.now()
+  logStart(s)
   s.files = makeTransfer(file, openSink, (dir, name, done, size) => {
     if (done >= size || done % (1 << 20) < 16 * 1024) tell(s, { t: 'xfer', dir: dir === 'up' ? 'down' : 'up', name, done, size })
   })
@@ -287,9 +311,22 @@ async function admit(s: Session, file: RTCDataChannel) {
     onClose: (id) => zp.tcpHostDrop(s.sid, id),
   })
   await attachMedia(s)
-  tell(s, { t: 'state', name: cfg.name, platform: zp.platform, locked, ...privacy, macs: await zp.macs(), ...(await zp.displays()) })
+  tell(s, { t: 'state', name: cfg.name, platform: zp.platform, locked, ...privacy, macs: await zp.macs(), ...(await zp.displays()), ...(update ? { update } : {}) })
   syncSessions()
   void save()
+}
+
+/**
+ * One log line per visit: a phone that drops and reconnects within a minute (background, network change, codec
+ * switch) continues its line and is not announced again.
+ */
+function logStart(s: Session) {
+  const now = Date.now(), log = (cfg.log ??= [])
+  const open = log.find((e) => e.devId === s.dev.devId && (e.to === undefined || now - e.to < 60_000))
+  if (open) { open.to = undefined; s.log = open; return }
+  log.unshift((s.log = { devId: s.dev.devId, dev: s.dev.name, from: now }))
+  log.length = Math.min(log.length, LOG_MAX)
+  zp.notify(`${s.dev.name} đang điều khiển máy này`)
 }
 
 function input(s: Session, m: Input) {
@@ -342,6 +379,7 @@ const handlers: Record<string, (s: Session, m: Ctl) => unknown> = {
     tell(s, { t: 'note', s: n ? `Đã gửi gói đánh thức (${n} địa chỉ MAC) vào mạng LAN của ${cfg.name}` : 'Không có địa chỉ MAC hợp lệ' })
   },
   anno: (_s, m) => void zp.annotate(m),
+  update: () => installUpdate(),
 }
 
 // ---- clipboard --------------------------------------------------------------------------------

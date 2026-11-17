@@ -92,6 +92,7 @@ export function openSession(host: HostEntry, onClose: () => void, qName = host.p
   let files: ReturnType<typeof makeTransfer> | null = null
   let clipLast = '', clipRemote = ''
   let privacyOn = false, platform = ''
+  let update: { current: string; latest: string; available: boolean; auto: boolean } | null = null
   const tcpSid = crypto.randomUUID(), tunnels = new Map<number, number>()
   let tunnel: ReturnType<typeof makeTunnel> | null = null
   const offTcp = zp?.onTcpCtl((sid: string, kind: string, id: number, data: unknown) => {
@@ -167,11 +168,15 @@ export function openSession(host: HostEntry, onClose: () => void, qName = host.p
         }
         if (Array.isArray(m.macs) && m.macs.join() !== (host.macs ?? []).join()) void saveHost({ ...host, macs: (host.macs = m.macs.map(String)) })
         if (m.name && host.name === 'Máy mới') void saveHost({ ...host, name: (host.name = m.name) })
+        if (m.update?.available && m.update.latest !== update?.latest) {
+          update = m.update
+          say(`Máy chủ đang chạy ${update!.current}, đã có bản ${update!.latest} — xem menu “Thêm”`, 6000)
+        }
       } else if (m.t === 'clip') {
         clipLast = clipRemote = String(m.s)
         navigator.clipboard?.writeText(clipRemote).catch(() => {}) // needs focus (and a tap on iOS): "Lấy clipboard" is the manual path
       } else if (m.t === 'xfer' && m.dir === 'up' && m.done >= m.size) say(`✓ ${m.name} đã tới máy chủ (Downloads/ZeroPort)`)
-      else if (m.t === 'note') say(String(m.s))
+      else if (m.t === 'note') say(String(m.s), typeof m.ms === 'number' ? Math.min(30_000, Math.max(1000, m.ms)) : 4000)
       else if (m.t === 'sysinfo') showInfo(m)
       else if (m.t === 'term') termOut(m)
     },
@@ -401,6 +406,9 @@ export function openSession(host: HostEntry, onClose: () => void, qName = host.p
   // ---- M4 panels: power, sysinfo, terminal, Wake-on-LAN -------------------------------------------
   let termActive = false
   panel.addEventListener('close', () => {
+    // The close event is queued: one from the previous panel (system info…) can land after the panel was reopened as
+    // the terminal, and must not kill the shell that just started.
+    if (panel.open) return
     if (termActive) { termActive = false; remote.send({ t: 'term', close: true }) }
   }, sig)
 
@@ -603,7 +611,7 @@ export function openSession(host: HostEntry, onClose: () => void, qName = host.p
     else if (kind === 'more') menu.innerHTML = MORE.map(([a, l]) => {
       const label = a === 'rec' && rec ? 'Dừng ghi' : a === 'privacy' && privacyOn ? 'Tắt chế độ riêng tư' : a === 'game' && game ? 'Tắt chuột game' : l
       return `<button data-m="${a}" class="span2">${label}</button>`
-    }).join('')
+    }).join('') + (update?.available ? `<button data-m="update" class="span2">Cập nhật máy chủ ${esc(update.current)} → ${esc(update.latest)}</button>` : '')
   }
   // preventDefault on pointerdown keeps focus (and the soft keyboard) where it is; the action runs on click,
   // which — unlike a touch pointerdown — counts as a user gesture for clipboard, file picker and fullscreen.
@@ -642,6 +650,10 @@ export function openSession(host: HostEntry, onClose: () => void, qName = host.p
     else if (b.dataset.m === 'wol') void showWol()
     else if (b.dataset.m === 'anno') setAnno(!!anno.hidden)
     else if (b.dataset.m === 'tcp') showTcp()
+    else if (b.dataset.m === 'update' && update) {
+      if (!update.auto) say('Máy chủ này không tự cập nhật được (chỉ bản cài Windows) — tải bản mới ở trang Releases trên GitHub', 8000)
+      else if (confirm(`Cập nhật ZeroPort trên máy chủ lên ${update.latest}? Máy chủ tự tải, cài và chạy lại — phiên sẽ ngắt khoảng 1 phút.`)) remote.send({ t: 'update' })
+    }
   }, sig)
   bar.addEventListener('click', (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>('button')

@@ -4,12 +4,17 @@ import qrcode from 'qrcode-generator'
 import { link } from './signal'
 import { deriveKeys, parsePairing } from './proto'
 import { listHosts, removeHost, saveHost, type HostEntry } from './store'
-import { activeSessions, hostCfg, hostStats, isHost, newPairing, revoke, startHost, totpBegin, totpDisable, totpEnable, updateSettings } from './host'
+import { activeSessions, hostCfg, hostStats, installUpdate, isHost, newPairing, revoke, startHost, totpBegin, totpDisable, totpEnable, updateInfo, updateSettings, type LogEntry } from './host'
 import { openSession } from './view'
 import { openWall } from './wall'
 
 const app = document.getElementById('app')!
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
+const when = (t: number) => new Date(t).toLocaleString('vi-VN')
+function logLine(e: LogEntry) {
+  const end = e.to === undefined ? 'đang kết nối' : e.to ? `${Math.max(1, Math.round((e.to - e.from) / 60_000))} phút` : 'không rõ lúc ngắt'
+  return `<div class="sub">${when(e.from)} · <b style="color:var(--text)">${esc(e.dev)}</b> · ${end}</div>`
+}
 let hosts: HostEntry[] = []
 let unwatch: (() => void)[] = []
 
@@ -47,6 +52,7 @@ async function render() {
   unwatch.splice(0).forEach((off) => off())
   const cfg = isHost ? hostCfg() : null
   const busy = isHost ? activeSessions() : []
+  const upd = isHost ? updateInfo() : null
   app.innerHTML = `
     <h1><img src="icon-192.png" alt="">ZeroPort</h1>
     <div class="row" style="align-items:center;justify-content:space-between;margin:28px 0 10px">
@@ -71,7 +77,8 @@ async function render() {
       <div class="card">
         <span class="dot on"></span>
         <div class="grow"><div class="name">${esc(cfg.name)}</div>
-          <div class="sub">${busy.length ? `Đang được điều khiển bởi ${esc(busy.join(', '))}` : 'Sẵn sàng nhận kết nối'}</div></div>
+          <div class="sub">${busy.length ? `Đang được điều khiển bởi ${esc(busy.join(', '))}` : 'Sẵn sàng nhận kết nối'}${upd ? ` · bản ${esc(upd.current)}` : ''}</div></div>
+        ${upd?.available ? `<button data-act="update" title="Có bản mới trên GitHub">Cập nhật ${esc(upd.latest)}</button>` : ''}
         <button data-act="settings" title="Cài đặt">⚙</button>
         <button class="primary" data-act="pair">Ghép thiết bị mới</button>
       </div>
@@ -80,7 +87,8 @@ async function render() {
           <div class="grow"><div class="name">${esc(d.name)}</div>
             <div class="sub">${d.seen ? `Kết nối gần nhất: ${new Date(d.seen).toLocaleString('vi-VN')}` : 'Chưa kết nối lần nào'}</div></div>
           <button class="danger" data-act="revoke">Thu hồi</button>
-        </div>`).join('')}` : ''}
+        </div>`).join('')}
+      ${cfg.log?.length ? `<details class="card" style="display:block"><summary>Lịch sử kết nối (${cfg.log.length})</summary>${cfg.log.map(logLine).join('')}</details>` : ''}` : ''}
 `
   for (const h of hosts) {
     unwatch.push(link(h.hostId).onPresence((on) => {
@@ -114,6 +122,12 @@ app.addEventListener('click', async (e) => {
     if (confirm(`Xoá “${host.name}” khỏi danh sách? Muốn kết nối lại phải ghép cặp lại.`)) { await removeHost(host.hostId); await render() }
   } else if (act === 'revoke' && devId) {
     if (confirm('Thu hồi quyền của thiết bị này? Nó sẽ bị ngắt và không kết nối lại được.')) await revoke(devId)
+  } else if (act === 'update') {
+    const u = updateInfo()
+    if (!u?.auto) return toast('Chỉ bản cài Windows tự cập nhật được — tải bản mới ở trang Releases trên GitHub')
+    if (!confirm(`Tải và cài ZeroPort ${u.latest}? Ứng dụng sẽ tự thoát rồi mở lại sau khi cài.`)) return
+    toast('Đang tải bản cập nhật…')
+    await installUpdate().catch((err) => toast(`Cập nhật thất bại: ${err?.message ?? err}`))
   } else if (act === 'settings') await showSettings()
   else if (act === 'pair') {
     const name = await ask('Tên thiết bị sẽ điều khiển máy này', `Thiết bị ${hostCfg().devices.length + 1}`)

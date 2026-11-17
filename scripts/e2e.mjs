@@ -79,6 +79,11 @@ try {
   console.log('mean luma', luma.toFixed(1))
   assert.ok(luma > 2, 'video is black')
 
+  // the host logs the visit (and shows its version once GitHub answered)
+  const logLine = await host.until(`document.querySelector('details.card .sub')?.textContent`, 'connection log')
+  assert.match(logLine, /e2e \d+ · đang kết nối/)
+  console.log('log:', logLine, '| host card:', await host(`document.querySelector('[data-act=settings]').closest('.card').querySelector('.sub').textContent`))
+
   // a pointer move on the controller must move the OS cursor to the same relative spot
   if (process.platform === 'win32') {
     const user32 = koffi.load('user32.dll')

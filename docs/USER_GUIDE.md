@@ -58,6 +58,8 @@ Mã ghép cặp chứa khoá bí mật ở phần `#fragment` (không bao giờ 
   1. Bấm **Bật 2FA…**, quét QR bằng Google Authenticator / 1Password / Bitwarden.
   2. Nhập mã 6 số để kích hoạt.
   3. Từ đó, mỗi lần điều khiển sẽ hỏi thêm mã 6 số (nhớ trong 10 phút cho cùng thiết bị nếu kết nối lại nhanh; tự khoá tạm 15 phút nếu nhập sai 10 lần).
+- **Lịch sử kết nối:** ngay dưới danh sách thiết bị ở mục *Máy này*, mở **Lịch sử kết nối** để xem 50 lần điều khiển gần nhất (giờ bắt đầu, thiết bị, thời lượng). Mỗi lần có thiết bị vào điều khiển, máy host hiện **thông báo** của hệ điều hành; điện thoại rớt mạng rồi nối lại trong vòng 1 phút được tính là cùng một lần, không báo lại.
+- **Cập nhật:** dòng trạng thái của *Máy này* ghi phiên bản đang chạy; khi GitHub có bản mới, nút **Cập nhật x.y.z** hiện ra (máy tự kiểm tra lúc mở app và mỗi 6 giờ).
 - **Máy chủ TURN/STUN:** mặc định để trống (dùng STUN miễn phí, đi P2P trực tiếp). Chỉ cần dán mảng JSON `[{"urls":"turn:...","username":"...","credential":"..."}]` (ví dụ lấy từ Cloudflare Calls/Realtime) nếu bạn hay kết nối qua mạng công ty chặn UDP hoặc 4G CGNAT không nối trực tiếp được.
 
 ---
@@ -108,6 +110,7 @@ Trên thẻ máy ở **Máy của tôi**:
 - **Đánh thức máy khác (Wake-on-LAN):** nhờ một máy host đang online gửi gói đánh thức (magic packet) tới máy khác trong cùng mạng LAN. ZeroPort tự lưu địa chỉ MAC của mỗi host sau lần kết nối đầu tiên; bạn cũng có thể nhập MAC thủ công.
 - **Bảng vẽ chú thích:** chọn màu và vẽ trực tiếp lên màn hình để chỉ dẫn cho người ngồi ở máy host (hiển thị bằng lớp phủ trong suốt, không làm bấm nhầm vào cửa sổ bên dưới); có nút **Xoá** và **Thoát vẽ**.
 - **Chuyển tiếp cổng TCP** *(chỉ khi điều khiển bằng app desktop Electron)*: chuyển tiếp cổng cục bộ `127.0.0.1:<cổng máy này>` sang `127.0.0.1:<cổng máy chủ>` (ví dụ `2222 → 22` cho SSH hoặc xem web local trên máy host).
+- **Cập nhật máy chủ x → y** *(chỉ hiện khi host có bản mới)*: host Windows tự tải bộ cài từ trang Releases của ZeroPort trên GitHub, kiểm tra SHA-256 do GitHub công bố, cài im lặng rồi tự mở lại (ẩn ở khay). Phiên ngắt khoảng 1 phút rồi tự kết nối lại. Host chỉ tải từ đúng kho ZeroPort — người điều khiển không chỉ định được tệp nào khác. Host macOS: phải tải DMG mới và cài tay. *(Tính năng có từ 0.2.4: máy đang chạy 0.2.3 trở về trước phải cài tay lên 0.2.4 một lần.)*
 
 ---
 
