@@ -28,6 +28,9 @@ test('envelopes, per-device SSE, malformed requests, per-address limit', async (
   try {
     assert.match(await raw(port, 'GET // HTTP/1.1\r\nHost: a\r\n\r\n'), /^HTTP\/1\.1 400/) // used to throw in the main process
     assert.match(await raw(port, 'GET /tv/x.mp4 HTTP/1.1\r\nHost: a\r\n\r\n'), /^HTTP\/1\.1 404/)
+    const pre = await fetch(`http://127.0.0.1:${port}/m`, { method: 'OPTIONS', headers: { 'access-control-request-private-network': 'true' } })
+    assert.equal(pre.status, 204)
+    assert.equal(pre.headers.get('access-control-allow-private-network'), 'true')
 
     const env = { v: 1, to: 'h', d: 'AAAAAAAAAAA', t: 'hello', iv: 'i', ct: 'c' }
     await fetch(`http://127.0.0.1:${port}/m`, { method: 'POST', body: JSON.stringify(env) })

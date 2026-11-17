@@ -77,12 +77,16 @@ export async function start(id, port, recorder) {
   await stop()
   const token = randomBytes(16).toString('hex')
   const url = `http://${localFor(new URL(tv.control).hostname, port)}/tv/${token}.mp4`
-  cur = { ...tv, token, url, recorder }
+  const mine = (cur = { ...tv, token, url, recorder })
+  // stop() or another start() may run while the TV is answering: the newer call wins, this one backs out.
+  const gone = async () => { if (cur === mine) return false; await soap(tv.control, 'Stop', {}).catch(() => {}); return true }
   const meta = `<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/"><item id="0" parentID="-1" restricted="1"><dc:title>ZeroPort — ${xml(os.hostname())}</dc:title><upnp:class>object.item.videoItem</upnp:class><res protocolInfo="http-get:*:video/mp4:${DLNA}">${xml(url)}</res></item></DIDL-Lite>`
   try {
     await soap(tv.control, 'SetAVTransportURI', { CurrentURI: url, CurrentURIMetaData: meta })
+    if (await gone()) throw new Error('Đã huỷ')
     await soap(tv.control, 'Play', { Speed: 1 })
-  } catch (e) { cur = null; throw e }
+    if (await gone()) throw new Error('Đã huỷ')
+  } catch (e) { if (cur === mine) { endStream(mine); cur = null } throw e }
   return tv.name
 }
 
@@ -108,21 +112,23 @@ export function serve(path, req, res) {
   const c = cur
   if (!c || path !== `${c.token}.mp4`) return false
   res.useChunkedEncodingByDefault = false // many TVs choke on chunked; a live stream simply ends when the connection closes
-  res.writeHead(200, { 'content-type': 'video/mp4', 'transfermode.dlna.org': 'Streaming', 'contentfeatures.dlna.org': DLNA, connection: 'close', 'cache-control': 'no-store' })
+  res.writeHead(200, { 'content-type': 'video/mp4', 'transfermode.dlna.org': 'Streaming', 'contentfeatures.dlna.org': DLNA, 'accept-ranges': 'none', connection: 'close', 'cache-control': 'no-store' })
   if (req.method === 'HEAD') return res.end(), true
   // A TV often probes and then reconnects: each GET gets a fresh recording that starts with its own init segment.
   endStream(c)
   c.res = res
   c.rid = ++rid
   c.recorder.begin(c.rid)
-  req.on('close', () => { if (c.res === res) { c.recorder.end(c.rid); c.res = null } })
+  const gone = () => { if (c.res === res) { c.recorder.end(c.rid); c.res = null } }
+  req.on('close', gone)
+  res.on('error', gone) // TV vanished mid-write (ECONNRESET/EPIPE): must not reach the main process as uncaught
   return true
 }
 
 /** A chunk of recording `id` from the renderer. */
 export function data(id, chunk) {
   const c = cur
-  if (!c?.res || c.rid !== id) return
+  if (!c?.res || c.rid !== id || c.res.destroyed || c.res.writableEnded) return
   // ponytail: a TV that stops reading is cut off at 32 MB queued; pause the recorder instead if that bites.
   if (c.res.writableLength > 32 << 20) return endStream(c)
   c.res.write(Buffer.from(chunk))

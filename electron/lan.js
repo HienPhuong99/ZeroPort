@@ -17,6 +17,8 @@ export function start(onEnvelope, onTv) {
     res.setHeader('access-control-allow-origin', '*')
     let url
     try { url = new URL(req.url, 'http://x') } catch { return res.writeHead(400).end() } // `GET //` would throw
+    // Preflight, if a WebView applies Private Network Access to the app's https://localhost page calling this LAN address.
+    if (req.method === 'OPTIONS') return res.writeHead(204, { 'access-control-allow-methods': 'GET, POST', 'access-control-allow-headers': 'content-type', 'access-control-allow-private-network': 'true', 'access-control-max-age': '600' }).end()
     if (req.method === 'POST' && url.pathname === '/m') return post(req, res, onEnvelope)
     if (req.method === 'GET' && url.pathname === '/m') return subscribe(url.searchParams.get('d') ?? '', req, res)
     if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname.startsWith('/tv/') && onTv(url.pathname.slice(4), req, res)) return

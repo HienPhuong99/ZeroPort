@@ -631,10 +631,17 @@ export function openSession(host: HostEntry, onClose: () => void, qName = host.p
 
   // ---- toolbar ------------------------------------------------------------------------------------
   const paintMods = () => menu.querySelectorAll<HTMLElement>('[data-mod]').forEach((b) => b.classList.toggle('on', sticky.has(b.dataset.mod!)))
+  let menuFrom: HTMLElement | null = null
+  function hideMenu() {
+    menu.hidden = true
+    if (remoteOnly) menuFrom?.focus() // back to the toolbar button that opened it
+  }
   function showMenu(kind: string) {
-    if (!menu.hidden && menu.dataset.kind === kind) { menu.hidden = true; return }
+    if (!menu.hidden && menu.dataset.kind === kind) return hideMenu()
+    menuFrom = document.activeElement as HTMLElement | null
     menu.dataset.kind = kind
     menu.hidden = false
+    if (remoteOnly) queueMicrotask(() => menu.querySelector<HTMLElement>('button')?.focus())
     if (kind === 'menu') {
       menu.innerHTML = `<div class="wide">Giữ phím bổ trợ cho phím kế tiếp</div>` +
         MODS.map(([l, c]) => `<button data-mod="${c}">${l}</button>`).join('') + '<span></span>' +
@@ -662,7 +669,7 @@ export function openSession(host: HostEntry, onClose: () => void, qName = host.p
       return
     }
     if (b.dataset.key) { combo(KEYS[+b.dataset.key][1]); if (sticky.size) releaseAll(); return }
-    menu.hidden = true
+    hideMenu()
     if (b.dataset.q) {
       const wantAv1 = (qName = b.dataset.q) === QAV1
       remote.send({ t: 'quality', ...QUALITY[qName] })
@@ -734,6 +741,16 @@ export function openSession(host: HostEntry, onClose: () => void, qName = host.p
     stats.textContent = line
   }, 1000)
 
+  // Back (browser, phone, TV remote): close what is open, on a TV go to the toolbar, and only then leave the session.
+  history.pushState({ zp: 'session' }, '')
+  addEventListener('popstate', () => {
+    if (!menu.hidden) hideMenu()
+    else if (panel.open) panel.close()
+    else if (remoteOnly && !bar.contains(document.activeElement)) bar.querySelector<HTMLElement>('button:not([hidden])')?.focus()
+    else return close()
+    history.pushState({ zp: 'session' }, '')
+  }, sig)
+
   function close() {
     releaseAll()
     rec?.stop()
@@ -747,6 +764,9 @@ export function openSession(host: HostEntry, onClose: () => void, qName = host.p
     clearInterval(tick)
     ac.abort()
     remote.close()
+    // Closed by a button: neutralise the entry Back would have used. (history.back() here would land on the next
+    // session's entry when reopening at once — codec switch — and close that one.)
+    if (history.state?.zp === 'session') history.replaceState(null, '')
     if (document.fullscreenElement) void document.exitFullscreen()
     root.hidden = true
     root.innerHTML = ''

@@ -38,7 +38,13 @@ export function openWall(hosts: HostEntry[], onPick: (h: HostEntry) => void, onC
     return r
   })
 
+  // Back (browser, phone, TV remote) leaves the wall instead of the app.
+  history.pushState({ zp: 'wall' }, '')
+  const back = () => { teardown(); onClose() }
+  addEventListener('popstate', back)
+
   function teardown() {
+    removeEventListener('popstate', back)
     remotes.forEach((r) => r.close())
     root.hidden = true
     root.innerHTML = ''

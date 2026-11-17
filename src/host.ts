@@ -449,12 +449,15 @@ export async function castStop() {
   tv = null
   rec?.stop()
   rec = null
+  wantRec = 0
   releaseCapture()
   onChange()
   tellAll({ t: 'tvs', tv })
 }
 
 let rec: { id: number; stop(): void } | null = null
+/** The recording the TV currently wants; an older record() still waiting on capture/play gives up. */
+let wantRec = 0
 /** H.264 in fragmented MP4 is what DLNA TVs play; AAC audio when the platform can encode it. */
 const TV_TYPES = ['video/mp4;codecs=avc1.640028,mp4a.40.2', 'video/mp4;codecs=avc1.640028', 'video/mp4']
 
@@ -465,16 +468,21 @@ const TV_TYPES = ['video/mp4;codecs=avc1.640028,mp4a.40.2', 'video/mp4;codecs=av
  * frames — and 1 s fragments — flowing; it also caps the TV stream at 1080p.
  */
 async function record(id: number) {
+  wantRec = id
   rec?.stop()
+  rec = null
   capture ??= await grab()
+  if (wantRec !== id) return
   const type = TV_TYPES.find((t) => MediaRecorder.isTypeSupported(t))
   if (!type) throw new Error('Máy này không ghi được H.264/MP4 để chiếu lên TV')
   const v = document.createElement('video')
   v.muted = true
   v.srcObject = new MediaStream(capture.getVideoTracks())
   await v.play()
+  if (wantRec !== id) return void (v.srcObject = null)
   const k = Math.min(1, 1920 / v.videoWidth, 1080 / v.videoHeight)
-  const c = Object.assign(document.createElement('canvas'), { width: Math.round(v.videoWidth * k / 2) * 2, height: Math.round(v.videoHeight * k / 2) * 2 })
+  const even = (n: number) => Math.max(2, Math.round(n * k / 2) * 2)
+  const c = Object.assign(document.createElement('canvas'), { width: even(v.videoWidth), height: even(v.videoHeight) })
   const g = c.getContext('2d')!
   const paint = setInterval(() => g.drawImage(v, 0, 0, c.width, c.height), 1000 / 30) // timers, not rAF: the window may be hidden
   g.drawImage(v, 0, 0, c.width, c.height)
@@ -488,6 +496,7 @@ async function record(id: number) {
 }
 
 function stopRecord(id: number) {
+  if (wantRec === id) wantRec = 0
   if (rec?.id !== id) return
   rec.stop()
   rec = null

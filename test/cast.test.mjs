@@ -43,6 +43,14 @@ test('find, cast, serve only the live token, stop', async () => {
     assert.equal(dead.status, 404, 'stream still served after stop')
     assert.deepEqual(rec.begun, [1])
     assert.deepEqual(rec.ended, [1])
+
+    // stop() while start() is still talking to the TV: start backs out and the TV ends up stopped, not playing
+    const racing = cast.start(me.id, port, rec)
+    await new Promise((r) => setImmediate(r)) // start() is now waiting on the TV
+    await cast.stop()
+    await assert.rejects(racing, /Đã huỷ/)
+    assert.equal(cast.casting(), null)
+    assert.equal(tv.actions.at(-1), 'Stop')
   } finally {
     clearInterval(rec.timer)
     tv.close()
