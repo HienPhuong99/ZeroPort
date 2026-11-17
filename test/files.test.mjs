@@ -79,9 +79,9 @@ test('openSink and download stream through zpAndroid when present', async () => 
 
     const big = new Uint8Array(70_000)
     big.fill(7)
-    await download(new Blob([big], { type: 'image/png' }), 'shot.png')
-    assert.equal(saved.get(2).name, 'shot.png')
-    assert.equal(saved.get(2).mime, 'image/png')
+    await download(new Blob([big], { type: 'video/webm;codecs=vp9,opus' }), 'shot.webm')
+    assert.equal(saved.get(2).name, 'shot.webm')
+    assert.equal(saved.get(2).mime, 'video/webm') // parameters stripped for MediaStore
     assert.equal(saved.get(2).ok, true)
     assert.deepEqual(Buffer.concat(saved.get(2).chunks), Buffer.from(big))
   } finally {

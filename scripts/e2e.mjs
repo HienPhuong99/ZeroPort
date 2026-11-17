@@ -129,8 +129,13 @@ try {
   await more('term')
   await ctl(`document.querySelector('#term-in input').value = 'echo ${marker}'; document.querySelector('#term-in').requestSubmit()`)
   await ctl.until(`document.querySelector('#term-out')?.textContent.split('${marker}').length > 1`, 'terminal output')
+  // "Mở lại" kills the shell and starts a new one, which must accept input (the old shell's late exit must not close it)
+  await ctl(`document.querySelector('#panel #trestart').click()`)
+  await sleep(2500)
+  await ctl(`document.querySelector('#term-in input').value = 'echo again-${marker}'; document.querySelector('#term-in').requestSubmit()`)
+  await ctl.until(`document.querySelector('#term-out')?.textContent.split('again-${marker}').length > 1`, 'terminal output after restart')
   await ctl(`document.querySelector('#panel #tclose').click()`)
-  console.log('terminal ok')
+  console.log('terminal ok (including restart)')
 
   // privacy mode: this machine's screens go black for ~2 s, but the veil is excluded from capture so the viewer still sees the desktop
   await more('privacy')

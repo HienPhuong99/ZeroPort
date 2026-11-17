@@ -113,7 +113,9 @@ export function termOpen(id, emit) {
   p.stdout.on('data', out)
   p.stderr.on('data', out)
   p.on('error', (e) => emit('data', `\n[${e.message}]\n`))
-  p.on('exit', (code) => { if (shells.get(id) === p) shells.delete(id); emit('exit', code) })
+  // Only the current shell may report its exit: after a restart the old one dies late, and its 'exit' would
+  // otherwise mark the new shell as closed (input silently dropped).
+  p.on('exit', (code) => { if (shells.get(id) !== p) return; shells.delete(id); emit('exit', code) })
   shells.set(id, p)
 }
 export function termWrite(id, s) { shells.get(id)?.stdin.write(String(s)) }

@@ -78,7 +78,7 @@ export async function openSink(name: string): Promise<Sink> {
     if (id < 0) throw new Error('android saveOpen failed')
     return {
       write: async (c) => { if (!android.saveWrite(id, toBase64(new Uint8Array(c)))) throw new Error('android saveWrite failed') },
-      close: async (ok) => { android.saveClose(id, ok) },
+      close: async (ok) => { if (!android.saveClose(id, ok) && ok) throw new Error('android saveClose failed') },
     }
   }
   // ponytail: whole file held in memory in browsers (fine to ~1 GB on desktop, less on phones); the desktop/Android apps stream.
@@ -92,7 +92,8 @@ export async function openSink(name: string): Promise<Sink> {
 export async function download(blob: Blob, name: string) {
   const android = zpAndroid()
   if (android) {
-    const id = android.saveOpen(name, blob.type || 'application/octet-stream')
+    // MediaRecorder types carry parameters ("video/webm;codecs=vp9,opus"); MediaStore wants the bare type.
+    const id = android.saveOpen(name, blob.type.split(';')[0] || 'application/octet-stream')
     if (id < 0) throw new Error('android saveOpen failed')
     let ok = false
     try {
@@ -102,7 +103,7 @@ export async function download(blob: Blob, name: string) {
       }
       ok = true
     } finally {
-      android.saveClose(id, ok)
+      if (!android.saveClose(id, ok) && ok) throw new Error('android saveClose failed')
     }
     return
   }
