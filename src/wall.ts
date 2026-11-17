@@ -45,6 +45,7 @@ export function openWall(hosts: HostEntry[], onPick: (h: HostEntry) => void, onC
 
   function teardown() {
     removeEventListener('popstate', back)
+    if (history.state?.zp === 'wall') history.replaceState(null, '') // closed by a button or a pick: Back has nothing to undo
     remotes.forEach((r) => r.close())
     root.hidden = true
     root.innerHTML = ''
