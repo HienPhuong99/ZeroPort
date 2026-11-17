@@ -110,11 +110,34 @@ Trên thẻ máy ở **Máy của tôi**:
 - **Đánh thức máy khác (Wake-on-LAN):** nhờ một máy host đang online gửi gói đánh thức (magic packet) tới máy khác trong cùng mạng LAN. ZeroPort tự lưu địa chỉ MAC của mỗi host sau lần kết nối đầu tiên; bạn cũng có thể nhập MAC thủ công.
 - **Bảng vẽ chú thích:** chọn màu và vẽ trực tiếp lên màn hình để chỉ dẫn cho người ngồi ở máy host (hiển thị bằng lớp phủ trong suốt, không làm bấm nhầm vào cửa sổ bên dưới); có nút **Xoá** và **Thoát vẽ**.
 - **Chuyển tiếp cổng TCP** *(chỉ khi điều khiển bằng app desktop Electron)*: chuyển tiếp cổng cục bộ `127.0.0.1:<cổng máy này>` sang `127.0.0.1:<cổng máy chủ>` (ví dụ `2222 → 22` cho SSH hoặc xem web local trên máy host).
+- **Chiếu lên TV:** đưa màn hình máy host lên một Smart TV trong cùng mạng với host (xem mục 5). Chọn TV trong danh sách; bấm lại để dừng.
 - **Cập nhật máy chủ x → y** *(chỉ hiện khi host có bản mới)*: host Windows tự tải bộ cài từ trang Releases của ZeroPort trên GitHub, kiểm tra SHA-256 do GitHub công bố, cài im lặng rồi tự mở lại (ẩn ở khay). Phiên ngắt khoảng 1 phút rồi tự kết nối lại. Host chỉ tải từ đúng kho ZeroPort — người điều khiển không chỉ định được tệp nào khác. Host macOS: phải tải DMG mới và cài tay. *(Tính năng có từ 0.2.4: máy đang chạy 0.2.3 trở về trước phải cài tay lên 0.2.4 một lần.)*
 
 ---
 
-## 5. Giới hạn cần biết & Mẹo vận hành không người
+## 5. Cùng mạng Wi-Fi / LAN, không cần Internet, và chiếu lên TV *(từ 0.2.5)*
+
+### Kết nối khi không có Internet
+- Khi thiết bị điều khiển và máy host ở **cùng một mạng** (cùng Wi-Fi/router), ZeroPort nối thẳng trong mạng nhà; Internet có hay mất đều được. Có Internet thì vẫn chạy như cũ.
+- Máy host mở một cổng trong mạng nội bộ (mặc định `47800`). **Lần đầu, Windows sẽ hỏi tường lửa — chọn _Cho phép_ cho mạng _Private_.** Không cho phép thì chế độ này và tính năng chiếu TV không chạy (kết nối qua Internet vẫn được).
+- Mã ghép cặp giờ kèm địa chỉ mạng nội bộ của host (phần `@192.168.x.x:47800` ở cuối), nên **ghép cặp được cả khi không có Internet**. Thiết bị đã ghép từ trước sẽ tự lưu địa chỉ này sau lần kết nối kế tiếp có Internet.
+- Chỉ có ở **app desktop và app Android**. Trang web mở từ GitHub Pages không được trình duyệt cho gọi vào mạng nội bộ, nên vẫn cần Internet.
+- Nếu router đổi IP của máy host, thiết bị chỉ biết địa chỉ mới sau một lần kết nối qua Internet (hoặc ghép cặp lại).
+
+### Chiếu màn hình host lên TV
+- Bấm **Chiếu lên TV** ở thẻ *Máy này* trên host, hoặc ở menu **Thêm → Chiếu lên TV** khi đang điều khiển từ điện thoại. Chọn TV trong danh sách. TV hiện màn hình host, còn bạn vẫn điều khiển bằng điện thoại.
+- Cần Smart TV có **DLNA** (đa số Samsung, LG, Sony, Panasonic…), bật và cùng mạng với **máy host**. Nếu không thấy TV: bật “Chia sẻ nội dung”/“Smart View”/“DLNA” trong cài đặt TV và kiểm tra tường lửa Windows (xem trên).
+- Hình trên TV trễ vài giây vì TV tự đệm. Dùng để trình chiếu hoặc xem, không dùng để chơi game.
+- Đổi màn hình (máy nhiều màn hình) thì TV tự tải lại. Bấm **Dừng chiếu TV** là luồng bị huỷ ngay: mỗi lần chiếu dùng một địa chỉ ngẫu nhiên mới, máy khác trong mạng không xem trộm được.
+- **Google TV / Chromecast** không hỗ trợ DLNA. Với các TV này, hãy cài app Android ZeroPort lên TV (xem dưới).
+
+### App ZeroPort trên Android TV / Google TV
+- Cài `ZeroPort-android.apk` lên TV (qua USB, hoặc app “Send files to TV” / “Downloader”). App hiện trong danh sách ứng dụng của TV.
+- TV đóng vai **thiết bị điều khiển**: ghép cặp bằng cách gõ mã vào ô *Thêm* (hoặc ghép trên điện thoại rồi dùng điện thoại). Dùng phím mũi tên và OK của remote để chọn nút. Trong phiên, phím mũi tên được gửi sang máy host; bấm phím **Menu** trên remote để nhảy lên thanh công cụ.
+
+---
+
+## 6. Giới hạn cần biết & Mẹo vận hành không người
 
 1. **Màn hình khoá Windows, màn hình đăng nhập, hộp thoại UAC, `Ctrl+Alt+Del`:**
    - Do ZeroPort chạy ở quyền người dùng thường (không cài service `SYSTEM`), Windows vẽ các màn hình bảo mật này trên desktop riêng nên app không chụp và không bấm được vào đó.

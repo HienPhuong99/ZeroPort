@@ -7,15 +7,16 @@ import http from 'node:http'
 import os from 'node:os'
 
 export const PORT = 47800
-const MAX_BODY = 64 << 10, MAX_SUBS = 32
-const subs = new Set() // { d, res }
+const MAX_BODY = 64 << 10, MAX_SUBS = 64, PER_IP = 4, MAX_QUEUED = 256 << 10
+const subs = new Set() // { d, ip, res, keep }
 let server = null, port = 0
 
-/** `onEnvelope(env)` for each POSTed envelope; `onTv(token, req, res)` returns false if the token is not live. */
+/** `onEnvelope(env)` for each POSTed envelope; `onTv(path, req, res)` returns false if the path is not the live token. */
 export function start(onEnvelope, onTv) {
   server = http.createServer((req, res) => {
     res.setHeader('access-control-allow-origin', '*')
-    const url = new URL(req.url, 'http://x')
+    let url
+    try { url = new URL(req.url, 'http://x') } catch { return res.writeHead(400).end() } // `GET //` would throw
     if (req.method === 'POST' && url.pathname === '/m') return post(req, res, onEnvelope)
     if (req.method === 'GET' && url.pathname === '/m') return subscribe(url.searchParams.get('d') ?? '', req, res)
     if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname.startsWith('/tv/') && onTv(url.pathname.slice(4), req, res)) return
@@ -46,20 +47,36 @@ function post(req, res, onEnvelope) {
 
 function subscribe(d, req, res) {
   if (!/^[\w-]{11}$/.test(d)) return res.writeHead(400).end()
-  // A stranger on the LAN can only hold slots open: drop the oldest rather than lock out the owner.
-  if (subs.size >= MAX_SUBS) { const old = subs.values().next().value; subs.delete(old); old.res.end() }
-  const sub = { d, res }
+  // Limits per address, so a stranger on the LAN cannot push out the owner's devices: past PER_IP the oldest stream
+  // of that same address goes (an app that reconnected), past MAX_SUBS new ones are refused.
+  const ip = req.socket.remoteAddress
+  const same = [...subs].filter((s) => s.ip === ip)
+  if (same.length >= PER_IP) drop(same[0])
+  if (subs.size >= MAX_SUBS) return res.writeHead(429).end()
+  const sub = { d, ip, res, keep: setInterval(() => write(sub, ': k\n\n'), 25_000) }
   subs.add(sub)
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' })
-  res.write(': zp\n\n')
-  const keep = setInterval(() => res.write(': k\n\n'), 25_000)
-  req.on('close', () => { clearInterval(keep); subs.delete(sub) })
+  write(sub, ': zp\n\n')
+  req.on('close', () => drop(sub))
+  res.on('error', () => drop(sub))
+}
+
+function drop(sub) {
+  if (!subs.delete(sub)) return
+  clearInterval(sub.keep)
+  sub.res.destroy()
+}
+
+/** A client that stops reading is cut off instead of growing our buffer. */
+function write(sub, line) {
+  if (sub.res.destroyed || sub.res.writableEnded || sub.res.writableLength > MAX_QUEUED) return drop(sub)
+  sub.res.write(line)
 }
 
 /** Envelope from this host to one controller (env.d), on every open subscription of that device. */
 export function send(env) {
   const line = `data: ${JSON.stringify(env)}\n\n`
-  for (const s of subs) if (s.d === env.d) s.res.write(line)
+  for (const s of subs) if (s.d === env.d) write(s, line)
 }
 
 /** "ip:port" for each IPv4 LAN address of this machine. */
@@ -70,4 +87,6 @@ export function addrs() {
     .map((a) => `${a.address}:${port}`)
 }
 
-export function stop() { server?.close(); for (const s of subs) s.res.end(); subs.clear() }
+export const listening = () => port
+
+export function stop() { server?.close(); for (const s of subs) drop(s) }

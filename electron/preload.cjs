@@ -47,6 +47,11 @@ contextBridge.exposeInMainWorld('zp', {
   lanSend: (env) => ipcRenderer.send('lan:send', env),
   lanAddrs: () => ipcRenderer.invoke('lan:addrs'),
   onLan: (fn) => ipcRenderer.on('lan', (_e, env) => fn(env)),
+  tvFind: () => ipcRenderer.invoke('cast:find'),
+  castStart: (id) => ipcRenderer.invoke('cast:start', id),
+  castStop: () => ipcRenderer.invoke('cast:stop'),
+  castData: (id, chunk) => ipcRenderer.send('cast:data', id, chunk),
+  onCast: (fn) => ipcRenderer.on('cast', (_e, kind, id) => fn(kind, id)),
   autostartGet:() => ipcRenderer.invoke('autostart:get'),
   autostartSet: (on) => ipcRenderer.invoke('autostart:set', on),
 })

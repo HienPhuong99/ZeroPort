@@ -8,6 +8,8 @@ import { link } from './signal'
 
 const root = document.getElementById('session')!
 const coarse = matchMedia('(pointer: coarse)').matches
+/** No pointer at all: a TV driven by its remote (D-pad), where the toolbar must be reachable by focus. */
+const remoteOnly = matchMedia('(pointer: none)').matches
 const zp = (window as any).zp
 const esc = (s: unknown) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 
@@ -35,7 +37,7 @@ const MORE: [string, string][] = [
   ['shot', 'Chụp ảnh màn hình'], ['rec', 'Ghi hình phiên'],
   ['privacy', 'Chế độ riêng tư'], ['power', 'Khoá / nguồn…'],
   ['info', 'Thông tin hệ thống'], ['term', 'Terminal'],
-  ...(coarse ? [] : [['game', 'Chuột game (khoá con trỏ)'] as [string, string]]), ['wol', 'Đánh thức máy khác'],
+  ...(coarse ? [] : [['game', 'Chuột game (khoá con trỏ)'] as [string, string]]), ['wol', 'Đánh thức máy khác'], ['tv', 'Chiếu lên TV'],
   ['anno', 'Bảng vẽ chú thích'], ...(zp ? [['tcp', 'Chuyển tiếp cổng TCP'] as [string, string]] : []),
 ]
 const POWER: [string, string, string][] = [
@@ -182,6 +184,7 @@ export function openSession(host: HostEntry, onClose: () => void, qName = host.p
       else if (m.t === 'note') say(String(m.s), typeof m.ms === 'number' ? Math.min(30_000, Math.max(1000, m.ms)) : 4000)
       else if (m.t === 'sysinfo') showInfo(m)
       else if (m.t === 'term') termOut(m)
+      else if (m.t === 'tvs') tvs(m)
     },
   })
   paintVeil()
@@ -351,6 +354,11 @@ export function openSession(host: HostEntry, onClose: () => void, qName = host.p
   function onKey(e: KeyboardEvent, d: 0 | 1) {
     // 229 / isComposing = soft keyboard or IME: that text arrives through the textarea below instead.
     if (e.isComposing || e.keyCode === 229 || !e.code || panel.open || otpDlg.open || (e.target as HTMLElement).closest?.('dialog')) return
+    if (remoteOnly) {
+      // TV remote: D-pad/OK move around the toolbar and menus; the Menu key jumps there from the picture.
+      if ((e.target as HTMLElement).closest?.('#bar, #menu')) return
+      if (e.code === 'ContextMenu') { e.preventDefault(); if (d) bar.querySelector<HTMLElement>('button:not([hidden])')?.focus(); return }
+    }
     e.preventDefault()
     const paste = d && e.code === 'KeyV' && (e.ctrlKey || e.metaKey) && !e.repeat
     const code = e.code
@@ -519,6 +527,31 @@ export function openSession(host: HostEntry, onClose: () => void, qName = host.p
     panel.showModal()
   }
 
+  // ---- M7: cast the host's screen to a TV on its network (electron/cast.js) ----------------------
+  let tvName: string | null = null
+  function showTvs() {
+    panel.innerHTML = `<strong>Chiếu màn hình máy chủ lên TV</strong>
+      <div class="sub" style="margin:6px 0 12px">Smart TV (DLNA) cùng mạng với <b>${esc(host.name)}</b>. Xem trên TV, điều khiển bằng thiết bị này.</div>
+      <div id="tvlist" class="sub">Đang tìm TV…</div>
+      <div class="row" style="justify-content:flex-end;margin-top:12px">${tvName ? '<button id="tvstop" class="danger">Dừng chiếu</button>' : ''}<button id="tvclose">Đóng</button></div>`
+    panel.querySelector('#tvclose')!.addEventListener('click', () => panel.close())
+    panel.querySelector('#tvstop')?.addEventListener('click', () => { remote.send({ t: 'tv', stop: 1 }); panel.close() })
+    remote.send({ t: 'tv' })
+    panel.showModal()
+  }
+  function tvs(m: Ctl) {
+    const now = typeof m.tv?.name === 'string' ? m.tv.name : null
+    if (now !== tvName) { tvName = now; say(now ? `Máy chủ đang chiếu lên ${now}` : 'Đã dừng chiếu lên TV') }
+    const box = panel.open && panel.querySelector('#tvlist')
+    if (!box || !Array.isArray(m.list)) return
+    box.innerHTML = m.list.length
+      ? m.list.map((t: any) => `<button data-tv="${esc(t.id)}" class="witem"><span>${esc(t.name)}</span>${t.id === m.tv?.id ? '<span class="sub">đang chiếu</span>' : ''}</button>`).join('')
+      : 'Không thấy TV nào. TV phải bật, cùng mạng với máy chủ và bật chia sẻ/DLNA; lần đầu, trên máy chủ phải cho phép ZeroPort qua tường lửa.'
+    box.querySelectorAll<HTMLElement>('[data-tv]').forEach((b) => {
+      b.onclick = () => { remote.send({ t: 'tv', id: b.dataset.tv }); say('Đang gửi tới TV…'); panel.close() }
+    })
+  }
+
   // ---- P2: annotation overlay & Electron TCP port forwarding -------------------------------------
   let annoColor = '#ef4444', annoPts: [number, number][] = [], annoDown = false
   const annoCtx = anno.getContext('2d')!
@@ -651,6 +684,7 @@ export function openSession(host: HostEntry, onClose: () => void, qName = host.p
     else if (b.dataset.m === 'term') openTerm()
     else if (b.dataset.m === 'game') toggleGame()
     else if (b.dataset.m === 'wol') void showWol()
+    else if (b.dataset.m === 'tv') showTvs()
     else if (b.dataset.m === 'anno') setAnno(!!anno.hidden)
     else if (b.dataset.m === 'tcp') showTcp()
     else if (b.dataset.m === 'update' && update) {

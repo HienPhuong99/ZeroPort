@@ -23,7 +23,10 @@ export async function latest(force = false) {
   if (!r.ok) throw new Error(`GitHub trả về ${r.status}`)
   const j = await r.json()
   const exe = j.assets?.find((a) => /^ZeroPort\.Setup\.[\d.]+\.exe$/.test(a.name))
-  cache = { latest: String(j.tag_name).replace(/^v/, ''), exe: exe && { url: exe.browser_download_url, sha256: String(exe.digest ?? '').replace(/^sha256:/, '') } }
+  const tag = String(j.tag_name).replace(/^v/, '')
+  // The version ends up in a file name and a command line: only plain x.y.z is accepted.
+  if (!/^\d+\.\d+\.\d+$/.test(tag)) throw new Error(`Phiên bản lạ trên GitHub: ${tag.slice(0, 40)}`)
+  cache = { latest: tag, exe: exe && { url: exe.browser_download_url, sha256: String(exe.digest ?? '').replace(/^sha256:/, '') } }
   cachedAt = Date.now()
   return cache
 }
@@ -47,8 +50,13 @@ export async function install(current) {
   // NSIS (electron-builder): /S = silent, --updated = give the running app a moment to exit before killing it.
   // Its own --force-run restart (ExecShellAsUser) did nothing when tried here, so a detached cmd waits for the
   // installer and starts the app again, hidden in the tray like an autostart. (A detached PowerShell, having no
-  // console, silently ran nothing.) Windows paths cannot contain `"`, so quoting them is enough.
-  const line = `/d /s /c "start "" /wait "${file}" /S --updated & start "" "${process.execPath}" --hidden"`
-  spawn(process.env.ComSpec || 'cmd.exe', [line], { detached: true, stdio: 'ignore', windowsHide: true, windowsVerbatimArguments: true }).unref()
+  // console, silently ran nothing.) The paths travel in environment variables: cmd expands %VAR% once (a `%` in a
+  // folder name stays literal) and the quotes keep `&`, `^`, `(` literal — Windows paths cannot contain `"`.
+  // Checked with a folder named `all & %OS% ^ ! z`.
+  const line = '/d /s /c "start "" /wait "%ZP_SETUP%" /S --updated & start "" "%ZP_EXE%" --hidden"'
+  spawn(process.env.ComSpec || 'cmd.exe', [line], {
+    detached: true, stdio: 'ignore', windowsHide: true, windowsVerbatimArguments: true,
+    env: { ...process.env, ZP_SETUP: file, ZP_EXE: process.execPath },
+  }).unref()
   return l.latest
 }

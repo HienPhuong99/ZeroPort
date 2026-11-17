@@ -123,7 +123,7 @@ Không giới hạn thiết bị, số phiên, thời gian phiên; không quản
 5. **M4** ✔ (đã test end-to-end qua WebRTC bằng `npm run e2e`: thông tin hệ thống, terminal, chế độ riêng tư, bảng vẽ, chuyển tiếp cổng TCP, codec AV1, cửa sổ phiên thứ hai; chưa test tự động: chuột game, TOTP qua giao diện, lấy tệp từ máy chủ, tường màn hình) P1: ghi hình, chế độ riêng tư, terminal, WoL, TOTP…
 6. **M5** ✔ APK Android (Capacitor + CI); review & gia cố bảo mật (CSP, kiểm tra replay/overflow/đường dẫn tệp/loopback TCP); P2 (codec AV1, tường màn hình, chuyển tiếp cổng TCP, bảng vẽ chú thích).
 7. **M6** ✔ (2026-11-17) Vận hành từ xa: cập nhật host từ xa (Windows) và lịch sử/thông báo kết nối — xem §7.
-8. **M7** (đang làm, 2026-11-17) Mạng nội bộ không cần Internet + chiếu lên TV — xem §8.
+8. **M7** ✔ (2026-11-17) Mạng nội bộ không cần Internet + chiếu lên TV + Android TV — xem §8.
 
 ## 6. Việc chỉ chủ máy làm được (không chặn tiến độ)
 
@@ -153,12 +153,17 @@ Hiện tại hai máy chung Wi-Fi đã truyền hình/thao tác thẳng trong LA
 
 | # | Việc | Cách làm | Ai |
 |---|---|---|---|
-| 26 | Kết nối trong LAN không cần Internet | `electron/lan.js`: host mở máy chủ HTTP nhỏ (cổng 47800, bận thì cổng khác). `POST /m` nhận phong bì signaling, `GET /m?d=<devId>` (SSE) đẩy phong bì cho đúng thiết bị đó. Phong bì vẫn niêm phong AES-GCM như qua Supabase → LAN cũng chỉ là kênh **không tin cậy**, không cần thêm khoá. `src/signal.ts`: một `Link` gửi/nhận song song Supabase + LAN, loại trùng theo `iv`. Controller biết địa chỉ LAN của host qua: link ghép cặp (`&lan=ip:port`), tin `state` sau mỗi lần vào, hoặc nhập tay. Host bỏ ẩn IP bằng mDNS (`WebRtcHideLocalIpsWithMdns`) để ICE có địa chỉ thật khi không có STUN. | Claude |
-| 27 | Chiếu màn hình host lên TV | DLNA/UPnP (đa số Smart TV Samsung/LG/Sony có sẵn, không cài gì lên TV): host dò TV bằng SSDP, gửi `SetAVTransportURI` + `Play` với `http://<ip-host>:<cổng>/tv/<token>.mp4`. Luồng = `MediaRecorder` H.264 (fMP4) từ chính màn hình đang chụp. Token ngẫu nhiên 128-bit cho mỗi lần chiếu, hết hiệu lực khi dừng. Bật/tắt từ thẻ *Máy này* hoặc menu *Thêm* của người điều khiển (xem trên TV, điều khiển bằng điện thoại). | Claude |
-| 28 | App trên Android TV / Google TV | APK hiện ra trong launcher của TV (`LEANBACK_LAUNCHER`, banner, `touchscreen`/`leanback` không bắt buộc), điều hướng bằng remote (D-pad). Thêm cleartext + mixed content cho WebView để gọi `http://<LAN>` (mục 26). | Gemini |
+| 26 | Kết nối trong LAN không cần Internet | `electron/lan.js`: host mở máy chủ HTTP nhỏ (cổng 47800, bận thì cổng khác). `POST /m` nhận phong bì signaling, `GET /m?d=<devId>` (SSE) đẩy phong bì cho đúng thiết bị đó. Phong bì vẫn niêm phong AES-GCM như qua Supabase → LAN cũng chỉ là kênh **không tin cậy**, không cần thêm khoá. `src/signal.ts`: một `Link` gửi/nhận song song Supabase + LAN, loại trùng theo `iv`. Controller biết địa chỉ LAN của host qua: mã/link ghép cặp (đuôi `@ip:port,…`) và tin `state` sau mỗi lần vào. Host bỏ ẩn IP bằng mDNS (`WebRtcHideLocalIpsWithMdns`) để ICE có địa chỉ thật khi không có STUN. | Claude ☑ (e2e: Supabase + STUN bị chặn vẫn ghép cặp và có hình) |
+| 27 | Chiếu màn hình host lên TV | DLNA/UPnP (đa số Smart TV Samsung/LG/Sony có sẵn, không cài gì lên TV): host dò TV bằng SSDP, gửi `SetAVTransportURI` + `Play` với `http://<ip-host>:<cổng>/tv/<token>.mp4`. Luồng = `MediaRecorder` H.264 (fMP4) từ chính màn hình đang chụp. Token ngẫu nhiên 128-bit cho mỗi lần chiếu, hết hiệu lực khi dừng. Bật/tắt từ thẻ *Máy này* hoặc menu *Thêm* của người điều khiển (xem trên TV, điều khiển bằng điện thoại). | Claude ☑ (TV giả DLNA trong e2e: 4 s → 122 khung H.264 1080p giải mã được bằng ffmpeg; **chưa thử TV thật**) |
+| 28 | App trên Android TV / Google TV | APK hiện ra trong launcher của TV (`LEANBACK_LAUNCHER`, banner, `touchscreen`/`leanback` không bắt buộc), điều hướng bằng remote (D-pad). Thêm cleartext + mixed content cho WebView để gọi `http://<LAN>` (mục 26). | Gemini ☑ (chưa thử trên TV thật) |
 
 Giới hạn biết trước:
 - Trình duyệt mở controller từ GitHub Pages (https) **không** gọi được `http://` trong LAN (mixed content) → chế độ không Internet chỉ có ở app desktop và app Android. Có Internet thì mọi thứ như cũ.
 - Lần đầu host mở cổng, Windows Firewall sẽ hỏi — chủ máy phải bấm **Cho phép (Private networks)**; app không tự đổi tường lửa.
 - Chromecast / Google TV không có DLNA: cần Cast SDK + đăng ký receiver với Google → chưa làm; dùng mục 28 (cài APK lên TV) thay thế.
 - Độ trễ trên TV vài giây (TV tự đệm) — để xem, không phải để điều khiển nhanh.
+
+Ghi chú kỹ thuật (đo trên máy thật):
+- Màn hình đứng yên thì `getDisplayMedia` không sinh khung mới → không có keyframe → bộ ghép MP4 của `MediaRecorder` (mỗi keyframe một fragment) không xuất gì sau phần đầu: TV chỉ nhận 771 byte trong 4 s. Sửa: vẽ lại canvas 30 fps rồi ghi từ `canvas.captureStream`, keyframe mỗi 1 s, giới hạn 1080p.
+- `new URL('//', base)` ném lỗi: một yêu cầu `GET //` từ máy lạ trong LAN từng làm văng tiến trình chính (Gemini bắt được) → trả 400.
+- SSE giới hạn 4 luồng mỗi địa chỉ IP (luồng cũ nhất của chính IP đó bị bỏ), tối đa 64; client đọc chậm quá 256 KB thì bị cắt.

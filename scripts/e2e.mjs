@@ -1,15 +1,16 @@
 // End-to-end check on one machine: starts two app instances (host + controller), pairs them through the UI,
 // connects through real signaling, then verifies video arrives and a pointer move reaches the OS cursor.
 // Run: npm run build && node scripts/e2e.mjs      (moves the real mouse briefly; Windows only for the cursor check)
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import assert from 'node:assert/strict'
 import electron from 'electron'
 import koffi from 'koffi'
 import { createHash, randomBytes } from 'node:crypto'
 import net from 'node:net'
-import { readFile, unlink } from 'node:fs/promises'
+import { readFile, rm, unlink, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { fakeTv } from './fake-tv.mjs'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const procs = []
@@ -184,6 +185,35 @@ try {
   console.log(`tcp tunnel ok, ${blob.length >> 20} MB round trip in ${((Date.now() - t0) / 1000).toFixed(1)} s`)
   await ctl(`document.querySelector('#panel #tclose').click()`)
 
+  // cast to a TV from the viewer's menu: a fake DLNA renderer gets SetAVTransportURI + Play, pulls the stream for 4 s,
+  // and that recording must decode as H.264 (ffmpeg, when installed); then the host card stops it
+  const tv = await fakeTv({ readMs: 4000 })
+  try {
+    await more('tv')
+    await ctl.until(`[...document.querySelectorAll('#panel [data-tv]')].some(b => b.textContent.includes(${JSON.stringify(tv.name)}))`, 'TV list', 15_000)
+    await ctl(`[...document.querySelectorAll('#panel [data-tv]')].find(b => b.textContent.includes(${JSON.stringify(tv.name)})).click()`)
+    const got = await tv.stream
+    assert.equal(got.status, 200, 'TV could not open the stream')
+    assert.equal(got.bytes.subarray(4, 8).toString(), 'ftyp', 'stream is not MP4')
+    await host.until(`document.querySelector('[data-act=tv]')?.textContent === 'Dừng chiếu TV'`, 'host card showing the cast')
+    const file = join(homedir(), 'Downloads', `zp-e2e-tv-${Date.now()}.mp4`)
+    await writeFile(file, got.bytes)
+    let probe = 'ffmpeg not installed: decode not checked'
+    try {
+      const r = spawnSync('ffmpeg', ['-hide_banner', '-i', file, '-map', '0:v', '-f', 'null', '-'], { encoding: 'utf8' })
+      if (!r.error) {
+        const frames = Math.max(0, ...[...r.stderr.matchAll(/frame=\s*(\d+)/g)].map((m) => +m[1]))
+        probe = `${/Video: (\w+)[^\n]*?(\d{3,5}x\d{3,5})/.exec(r.stderr)?.slice(1).join(' ')}, ${frames} frames decoded`
+        assert.match(r.stderr, /Video: h264/, 'TV stream is not H.264')
+        assert.ok(frames >= 30, `only ${frames} frames in 4 s (${got.bytes.length} bytes): ${r.stderr.slice(-1500)}`)
+      }
+    } finally { await unlink(file) }
+    await host(`document.querySelector('[data-act=tv]').click()`)
+    await host.until(`document.querySelector('[data-act=tv]')?.textContent === 'Chiếu lên TV'`, 'cast stopped')
+    assert.equal(tv.actions.join(), 'SetAVTransportURI,Play,Stop')
+    console.log(`cast to TV ok: ${(got.bytes.length / 1024 / 1024).toFixed(1)} MB in 4 s, ${probe}`)
+  } finally { tv.close() }
+
   // AV1 mode reconnects with another codec preference; check what was really negotiated
   await ctl(`document.querySelector('[data-a=quality]').click(); [...document.querySelectorAll('[data-q]')].find(b => b.dataset.q.startsWith('AV1')).click()`)
   await sleep(1500)
@@ -215,6 +245,8 @@ try {
   // No Internet: Supabase and STUN do not resolve for a second pair, which must pair, see the host and connect
   // through the host's LAN server alone (electron/lan.js).
   const offline = '--host-resolver-rules=MAP *.supabase.co ~NOTFOUND, MAP stun.* ~NOTFOUND'
+  // Fresh profiles: they are paired from scratch, and one killed by the previous run may not decrypt any more.
+  if (process.env.APPDATA) for (const p of ['e2e-lan-host', 'e2e-lan-ctl']) await rm(join(process.env.APPDATA, 'zeroport', `profile-${p}`), { recursive: true, force: true })
   const lhost = await launch('e2e-lan-host', 9225, offline)
   const lctl = await launch('e2e-lan-ctl', 9226, '--hidden', offline)
   await lhost.until(`!!document.querySelector('[data-act=pair]')`, 'LAN host UI')

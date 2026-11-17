@@ -4,7 +4,7 @@ import qrcode from 'qrcode-generator'
 import { link } from './signal'
 import { deriveKeys, parsePairing } from './proto'
 import { listHosts, removeHost, saveHost, type HostEntry } from './store'
-import { activeSessions, hostCfg, hostStats, installUpdate, isHost, newPairing, revoke, startHost, totpBegin, totpDisable, totpEnable, updateInfo, updateSettings, type LogEntry } from './host'
+import { activeSessions, castInfo, castStop, castTo, findTvs, hostCfg, hostStats, installUpdate, isHost, newPairing, revoke, startHost, totpBegin, totpDisable, totpEnable, updateInfo, updateSettings, type LogEntry } from './host'
 import { openSession } from './view'
 import { openWall } from './wall'
 
@@ -53,6 +53,7 @@ async function render() {
   const cfg = isHost ? hostCfg() : null
   const busy = isHost ? activeSessions() : []
   const upd = isHost ? updateInfo() : null
+  const tv = isHost ? castInfo() : null
   app.innerHTML = `
     <h1><img src="icon-192.png" alt="">ZeroPort</h1>
     <div class="row" style="align-items:center;justify-content:space-between;margin:28px 0 10px">
@@ -77,8 +78,9 @@ async function render() {
       <div class="card">
         <span class="dot on"></span>
         <div class="grow"><div class="name">${esc(cfg.name)}</div>
-          <div class="sub">${busy.length ? `Đang được điều khiển bởi ${esc(busy.join(', '))}` : 'Sẵn sàng nhận kết nối'}${upd ? ` · bản ${esc(upd.current)}` : ''}</div></div>
+          <div class="sub">${busy.length ? `Đang được điều khiển bởi ${esc(busy.join(', '))}` : 'Sẵn sàng nhận kết nối'}${tv ? ` · đang chiếu lên ${esc(tv.name)}` : ''}${upd ? ` · bản ${esc(upd.current)}` : ''}</div></div>
         ${upd?.available ? `<button data-act="update" title="Có bản mới trên GitHub">Cập nhật ${esc(upd.latest)}</button>` : ''}
+        <button data-act="tv" title="Chiếu màn hình này lên Smart TV (DLNA) trong cùng mạng">${tv ? 'Dừng chiếu TV' : 'Chiếu lên TV'}</button>
         <button data-act="settings" title="Cài đặt">⚙</button>
         <button class="primary" data-act="pair">Ghép thiết bị mới</button>
       </div>
@@ -127,9 +129,15 @@ app.addEventListener('click', async (e) => {
   } else if (act === 'update') {
     const u = updateInfo()
     if (!u?.auto) return toast('Chỉ bản cài Windows tự cập nhật được — tải bản mới ở trang Releases trên GitHub')
-    if (!confirm(`Tải và cài ZeroPort ${u.latest}? Ứng dụng sẽ tự thoát rồi mở lại sau khi cài.`)) return
+    const busy = activeSessions()
+    if (!confirm(`Tải và cài ZeroPort ${u.latest}? Ứng dụng sẽ tự thoát rồi mở lại sau khi cài.${busy.length ? `
+
+Đang kết nối: ${busy.join(', ')} — sẽ bị ngắt khoảng 1 phút.` : ''}`)) return
     toast('Đang tải bản cập nhật…')
     await installUpdate().catch((err) => toast(`Cập nhật thất bại: ${err?.message ?? err}`))
+  } else if (act === 'tv') {
+    if (castInfo()) await castStop().catch((err) => toast(`Không dừng được: ${err?.message ?? err}`))
+    else await showTvs()
   } else if (act === 'settings') await showSettings()
   else if (act === 'pair') {
     const name = await ask('Tên thiết bị sẽ điều khiển máy này', `Thiết bị ${hostCfg().devices.length + 1}`)
@@ -172,6 +180,24 @@ async function showSettings() {
       toast('Đã lưu')
     } catch (err: any) { toast(`Không lưu được: ${err?.message ?? err}`) }
   }, { once: true })
+}
+
+async function showTvs() {
+  const dlg = document.getElementById('dlg') as HTMLDialogElement
+  dlg.innerHTML = `<form method="dialog"><strong>Chiếu lên TV</strong><div class="sub" id="tvs" style="margin:12px 0">Đang tìm Smart TV (DLNA) trong mạng…</div>
+    <div class="row" style="justify-content:flex-end"><button>Đóng</button></div></form>`
+  dlg.showModal()
+  const list = await findTvs().catch(() => [])
+  const box = dlg.querySelector('#tvs')
+  if (!box || !dlg.open) return
+  box.innerHTML = list.length
+    ? list.map((t) => `<button type="button" class="witem" data-tv="${esc(t.id)}" style="width:100%;margin-bottom:6px">${esc(t.name)}</button>`).join('')
+    : 'Không thấy TV nào. TV phải bật, cùng mạng với máy này, và bật chia sẻ/DLNA (Samsung: “Smart View”/“Chia sẻ nội dung”, LG: “Chia sẻ màn hình”/“DLNA”). Windows sẽ hỏi tường lửa lần đầu — chọn Cho phép.'
+  box.querySelectorAll<HTMLElement>('[data-tv]').forEach((b) => (b.onclick = async () => {
+    b.textContent = 'Đang gửi tới TV…'
+    try { await castTo(b.dataset.tv!); toast(`Đang chiếu lên ${castInfo()?.name}`); dlg.close() }
+    catch (err: any) { b.textContent = `Lỗi: ${err?.message ?? err}` }
+  }))
 }
 
 function showTotp() {

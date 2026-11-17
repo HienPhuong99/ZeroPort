@@ -14,7 +14,7 @@ export function openWall(hosts: HostEntry[], onPick: (h: HostEntry) => void, onC
     </div>
     <div id="wall-grid">
       ${hosts.map((h, i) => `
-        <div class="wtile" data-i="${i}">
+        <div class="wtile" data-i="${i}" tabindex="0" role="button">
           <video autoplay playsinline muted disablepictureinpicture></video>
           <div class="wcap"><span class="wname">${esc(h.name)}</span><span class="wstat">Đang kết nối…</span></div>
         </div>`).join('')}
@@ -34,6 +34,7 @@ export function openWall(hosts: HostEntry[], onPick: (h: HostEntry) => void, onC
       ctl() {},
     })
     tile.onclick = () => { teardown(); onPick(h) }
+    tile.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') tile.click() } // TV remote / keyboard
     return r
   })
 

@@ -53,9 +53,12 @@ let lockTimer: ReturnType<typeof setTimeout> | undefined
 let otpFails: number[] = []
 let onChange = () => {}
 let update: UpdateInfo | null = null
+/** The TV this screen is being cast to (electron/cast.js), if any. */
+let tv: { id: string; name: string } | null = null
 
 export const hostCfg = () => cfg
 export const updateInfo = () => update
+export const castInfo = () => tv
 const authed = () => [...sessions.values()].filter((s) => s.authed)
 export const activeSessions = () => authed().map((s) => s.dev.name)
 const tell = (s: Session, m: Ctl) => { if (s.ctl.readyState === 'open') s.ctl.send(JSON.stringify(m)) }
@@ -101,6 +104,7 @@ export async function startHost(changed: () => void) {
     if (kind === 'data') void s.tunnel.data(id, data as Uint8Array).then(() => zp.tcpAck(sid, id))
     else if (kind === 'close') s.tunnel.close(id)
   })
+  zp.onCast((kind: string, id: number) => (kind === 'begin' ? void record(id).catch(console.error) : stopRecord(id)))
   // Free Supabase projects pause after a week without database traffic; Realtime alone may not count.
   const ping = () => { void supa.rpc('ping'); void checkUpdate() }
   ping()
@@ -114,7 +118,13 @@ async function checkUpdate() {
 }
 
 /** Downloads and starts the new installer; ZeroPort quits and the installer starts it again (Windows only). */
+let updating = false
 export async function installUpdate() {
+  if (updating) throw new Error('Đang cập nhật rồi')
+  updating = true
+  try { await doInstall() } catch (e) { updating = false; throw e } // on success the app quits
+}
+async function doInstall() {
   tellAll({ t: 'note', s: `Máy chủ đang tải bản ${update?.latest ?? 'mới'}…` })
   const v: string = await zp.updateInstall()
   tellAll({ t: 'note', s: `Đang cài ZeroPort ${v} — máy chủ sẽ ngắt khoảng 1 phút rồi tự kết nối lại`, ms: 15_000 })
@@ -236,7 +246,7 @@ function end(s: Session) {
   if (s.authed && cfg.totp) otpGrace.set(s.dev.devId, Date.now() + OTP_GRACE_MS)
   if (s.log && !authed().some((o) => o.log === s.log)) { s.log.to = Date.now(); void save() }
   s.pc.close()
-  if (!sessions.size && capture) { capture.getTracks().forEach((t) => t.stop()); capture = null }
+  releaseCapture()
   if (s.authed && !authed().length) {
     // Nobody is watching any more: never leave the screen blacked out or the local keyboard frozen.
     if (privacy.privacy) void zp.privacy(false).then((p: typeof privacy) => (privacy = p))
@@ -379,6 +389,13 @@ const handlers: Record<string, (s: Session, m: Ctl) => unknown> = {
     tell(s, { t: 'note', s: n ? `Đã gửi gói đánh thức (${n} địa chỉ MAC) vào mạng LAN của ${cfg.name}` : 'Không có địa chỉ MAC hợp lệ' })
   },
   anno: (_s, m) => void zp.annotate(m),
+  /** Viewer's "Chiếu lên TV": list renderers, start or stop. The viewer sees this screen anyway; the TV only shows it. */
+  async tv(s, m) {
+    if (m.stop) await castStop()
+    else if (typeof m.id === 'string') await castTo(m.id)
+    else return tell(s, { t: 'tvs', list: await findTvs(), tv })
+    tell(s, { t: 'tvs', tv })
+  },
   update: () => installUpdate(),
 }
 
@@ -409,6 +426,73 @@ async function grab() {
   }).catch(() => navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 60 } } })) // no system audio available
 }
 
+function releaseCapture() {
+  if (sessions.size || tv || !capture) return
+  capture.getTracks().forEach((t) => t.stop())
+  capture = null
+}
+
+// ---- cast to TV -------------------------------------------------------------------------------
+
+export const findTvs = (): Promise<{ id: string; name: string }[]> => zp.tvFind()
+
+export async function castTo(id: string) {
+  capture ??= await grab() // before the TV asks for the stream
+  const name: string = await zp.castStart(id).catch((e: unknown) => { releaseCapture(); throw e })
+  tv = { id, name }
+  onChange()
+  tellAll({ t: 'tvs', tv })
+}
+
+export async function castStop() {
+  await zp.castStop()
+  tv = null
+  rec?.stop()
+  rec = null
+  releaseCapture()
+  onChange()
+  tellAll({ t: 'tvs', tv })
+}
+
+let rec: { id: number; stop(): void } | null = null
+/** H.264 in fragmented MP4 is what DLNA TVs play; AAC audio when the platform can encode it. */
+const TV_TYPES = ['video/mp4;codecs=avc1.640028,mp4a.40.2', 'video/mp4;codecs=avc1.640028', 'video/mp4']
+
+/**
+ * The TV opened the stream (`id` = that HTTP response): record from the start so it gets an init segment first.
+ * Measured: a still desktop yields no new capture frames, so no keyframe, so the MP4 muxer (one fragment per
+ * keyframe) wrote nothing after the header and the TV got 771 bytes in 4 s. Repainting a canvas at 30 fps keeps
+ * frames — and 1 s fragments — flowing; it also caps the TV stream at 1080p.
+ */
+async function record(id: number) {
+  rec?.stop()
+  capture ??= await grab()
+  const type = TV_TYPES.find((t) => MediaRecorder.isTypeSupported(t))
+  if (!type) throw new Error('Máy này không ghi được H.264/MP4 để chiếu lên TV')
+  const v = document.createElement('video')
+  v.muted = true
+  v.srcObject = new MediaStream(capture.getVideoTracks())
+  await v.play()
+  const k = Math.min(1, 1920 / v.videoWidth, 1080 / v.videoHeight)
+  const c = Object.assign(document.createElement('canvas'), { width: Math.round(v.videoWidth * k / 2) * 2, height: Math.round(v.videoHeight * k / 2) * 2 })
+  const g = c.getContext('2d')!
+  const paint = setInterval(() => g.drawImage(v, 0, 0, c.width, c.height), 1000 / 30) // timers, not rAF: the window may be hidden
+  g.drawImage(v, 0, 0, c.width, c.height)
+  const [vt] = c.captureStream(30).getVideoTracks()
+  const stream = new MediaStream([vt, ...(type.includes('mp4a') ? capture.getAudioTracks() : [])])
+  const r = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 6_000_000, videoKeyFrameIntervalDuration: 1000 } as MediaRecorderOptions)
+  let q = Promise.resolve() // chunks must reach the TV in order
+  r.ondataavailable = (e) => { if (e.data.size) q = q.then(async () => zp.castData(id, new Uint8Array(await e.data.arrayBuffer()))) }
+  rec = { id, stop() { r.state !== 'inactive' && r.stop(); clearInterval(paint); vt.stop(); v.srcObject = null } }
+  r.start(250)
+}
+
+function stopRecord(id: number) {
+  if (rec?.id !== id) return
+  rec.stop()
+  rec = null
+}
+
 async function attachMedia(s: Session) {
   capture ??= await grab()
   const [vt] = capture.getVideoTracks(), [at] = capture.getAudioTracks()
@@ -423,6 +507,8 @@ async function recapture() {
   capture = await grab()
   for (const s of authed()) await attachMedia(s)
   old?.getTracks().forEach((t) => t.stop())
+  // A recording cannot switch tracks mid-stream: hand the TV a fresh stream of the new display.
+  if (tv) await castTo(tv.id).catch((e) => { console.warn('recast', e); void castStop() })
 }
 
 /** Bitrate/fps/sharpness of one viewer's stream. `smooth` favours frame rate over resolution. */

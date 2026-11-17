@@ -9,6 +9,7 @@ import { inject } from './input.js'
 import * as sys from './system.js'
 import * as upd from './update.js'
 import * as lan from './lan.js'
+import * as cast from './cast.js'
 
 const dir = dirname(fileURLToPath(import.meta.url))
 const dev = process.argv.includes('--dev')
@@ -27,7 +28,7 @@ if (!app.requestSingleInstanceLock()) app.quit()
 else app.whenReady().then(start)
 
 app.on('second-instance', () => { win?.show(); win?.focus() })
-app.on('before-quit', () => { quitting = true; lan.stop(); sys.privacy(false); sys.termCloseAll(); void sys.annotate({ close: true }); sys.tcpCloseAll() })
+app.on('before-quit', () => { quitting = true; void cast.stop(); lan.stop(); sys.privacy(false); sys.termCloseAll(); void sys.annotate({ close: true }); sys.tcpCloseAll() })
 app.on('window-all-closed', () => {}) // keep serving from the tray
 
 function start() {
@@ -85,7 +86,7 @@ function start() {
     }
   })
 
-  void lan.start((env) => win?.webContents.send('lan', env), () => false)
+  void lan.start((env) => win?.webContents.send('lan', env), cast.serve)
   powerSaveBlocker.start('prevent-app-suspension') // a sleeping host is an unreachable host
   screen.on('display-metrics-changed', () => { rect = null })
   screen.on('display-removed', () => { rect = null })
@@ -246,6 +247,13 @@ ipcMain.handle('update:install', guard(async () => {
 // ---- LAN signaling (electron/lan.js) ----------------------------------------------------------
 ipcMain.on('lan:send', (e, env) => { if (mine(e)) lan.send(env) })
 ipcMain.handle('lan:addrs', guard(() => lan.addrs()))
+
+// ---- cast to TV (electron/cast.js): the renderer records the capture, this process serves it to the TV ------------
+const recorder = { begin: (id) => win?.webContents.send('cast', 'begin', id), end: (id) => win?.webContents.send('cast', 'end', id) }
+ipcMain.handle('cast:find', guard(() => cast.find()))
+ipcMain.handle('cast:start', guard((id) => cast.start(String(id), lan.listening(), recorder)))
+ipcMain.handle('cast:stop', guard(() => cast.stop()))
+ipcMain.on('cast:data', (e, id, chunk) => { if (mine(e)) cast.data(id, chunk) })
 
 // ---- settings ---------------------------------------------------------------------------------
 // Only meaningful for the installed app: in development this would register electron.exe itself.
