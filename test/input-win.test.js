@@ -13,13 +13,18 @@ test('SendInput moves the cursor to the requested pixel', { skip: process.platfo
   const at = () => { const p = {}; getPos(p); return p }
   const go = (p) => inject({ t: 'mm', x: (p.x - rect.x) / (rect.width - 1), y: (p.y - rect.y) / (rect.height - 1) }, rect)
 
-  const start = at()
-  const target = { x: start.x > rect.x + 50 ? start.x - 37 : start.x + 37, y: start.y }
-  go(target)
-  const got = at()
-  go(start)
-  assert.ok(Math.abs(got.x - target.x) <= 1 && Math.abs(got.y - target.y) <= 1, `wanted ${JSON.stringify(target)} got ${JSON.stringify(got)}`)
-  assert.ok(Math.abs(at().x - start.x) <= 1)
+  // Retried: someone may be moving the real mouse while this runs.
+  let ok = false, seen = ''
+  for (let i = 0; i < 5 && !ok; i++) {
+    const start = at()
+    const target = { x: start.x > rect.x + 50 ? start.x - 37 : start.x + 37, y: start.y }
+    go(target)
+    const got = at()
+    go(start)
+    ok = Math.abs(got.x - target.x) <= 1 && Math.abs(got.y - target.y) <= 1 && Math.abs(at().x - start.x) <= 1
+    seen = `wanted ${JSON.stringify(target)} got ${JSON.stringify(got)}`
+  }
+  assert.ok(ok, seen)
 
   inject({ t: 'k', c: 'ShiftLeft', d: 1 }, rect)
   inject({ t: 'k', c: 'ShiftLeft', d: 0 }, rect)
