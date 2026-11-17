@@ -211,6 +211,30 @@ try {
 
   await ctl(`document.querySelector('[data-a=close]').click()`)
   await host.until(`!document.querySelector('#app').innerText.includes('điều khiển bởi')`, 'host to see the session end', 20_000)
+
+  // No Internet: Supabase and STUN do not resolve for a second pair, which must pair, see the host and connect
+  // through the host's LAN server alone (electron/lan.js).
+  const offline = '--host-resolver-rules=MAP *.supabase.co ~NOTFOUND, MAP stun.* ~NOTFOUND'
+  const lhost = await launch('e2e-lan-host', 9225, offline)
+  const lctl = await launch('e2e-lan-ctl', 9226, '--hidden', offline)
+  await lhost.until(`!!document.querySelector('[data-act=pair]')`, 'LAN host UI')
+  await lhost(`document.querySelector('[data-act=pair]').click()`)
+  await lhost.until(`!!document.querySelector('#dlg input')`, 'name dialog')
+  await lhost(`document.querySelector('#dlg input').value = 'lan ' + Date.now(); document.querySelector('#dlg button.primary').click()`)
+  const lcode = await lhost.until(`document.querySelector('#dlg code')?.textContent`, 'pairing code')
+  await lhost(`document.querySelector('#dlg #done').click()`)
+  assert.match(lcode, /@\d+\.\d+\.\d+\.\d+:\d+/, 'pairing code carries no LAN address')
+  await lctl.until(`!!document.querySelector('#add')`, 'LAN controller UI')
+  await lctl(`document.querySelector('#add input').value = ${JSON.stringify(lcode)}; document.querySelector('#add').requestSubmit()`)
+  await lctl.until(`document.querySelector('[data-host] .dot.on') !== null`, 'host online over LAN')
+  await lctl(`document.querySelector('[data-act=connect]').click()`)
+  await lctl.until(`document.querySelector('#veil')?.hidden === true && document.querySelector('video')?.videoWidth > 0`, 'session over LAN')
+  await sleep(2000)
+  const lluma = await lctl(`(() => { const v = document.querySelector('video'), c = document.createElement('canvas'); c.width = 64; c.height = 36;
+    const g = c.getContext('2d'); g.drawImage(v, 0, 0, 64, 36); const d = g.getImageData(0, 0, 64, 36).data; let s = 0; for (let i = 0; i < d.length; i += 4) s += d[i] + d[i+1] + d[i+2]; return s / (d.length / 4 * 3) })()`)
+  assert.ok(lluma > 2, 'LAN video is black')
+  console.log('LAN without Internet ok:', lcode.split('@')[1], 'luma', lluma.toFixed(1))
+  await lctl(`document.querySelector('[data-a=close]').click()`)
   console.log('E2E OK')
 } finally {
   for (const p of procs) p.kill()

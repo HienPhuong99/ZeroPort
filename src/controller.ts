@@ -27,6 +27,7 @@ interface Events {
 
 export function connect(host: HostEntry, on: Events): Remote {
   const sig = link(host.hostId)
+  sig.lan(host.devId, host.lan)
   let pc: RTCPeerConnection | null = null
   let ctl: RTCDataChannel | null = null, mv: RTCDataChannel | null = null
   let sid = '', closed = false, authed = false, tries = 0, otpWait = false

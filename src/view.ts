@@ -3,7 +3,8 @@ import { connect, type ConnState, type Remote } from './controller'
 import { download, makeTransfer, openSink } from './files'
 import { makeTunnel } from './tunnel'
 import { listHosts, saveHost, type HostEntry } from './store'
-import { CLIP_MAX, type Ctl } from './proto'
+import { CLIP_MAX, cleanAddrs, type Ctl } from './proto'
+import { link } from './signal'
 
 const root = document.getElementById('session')!
 const coarse = matchMedia('(pointer: coarse)').matches
@@ -167,6 +168,8 @@ export function openSession(host: HostEntry, onClose: () => void, qName = host.p
             : `Chế độ riêng tư: màn hình máy chủ đen${platform === 'win32' ? '. Chuột/phím tại chỗ vẫn dùng được — muốn chặn phải chạy ZeroPort bằng quyền admin' : ''}`, 7000)
         }
         if (Array.isArray(m.macs) && m.macs.join() !== (host.macs ?? []).join()) void saveHost({ ...host, macs: (host.macs = m.macs.map(String)) })
+        const lan = cleanAddrs(m.lan)
+        if (lan.length && lan.join() !== (host.lan ?? []).join()) { void saveHost({ ...host, lan: (host.lan = lan) }); link(host.hostId).lan(host.devId, lan) }
         if (m.name && host.name === 'Máy mới') void saveHost({ ...host, name: (host.name = m.name) })
         if (m.update?.available && m.update.latest !== update?.latest) {
           update = m.update

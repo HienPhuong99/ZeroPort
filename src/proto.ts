@@ -23,17 +23,22 @@ export function cat(...parts: Uint8Array[]): Uint8Array<ArrayBuffer> {
 // ---- pairing ----------------------------------------------------------------------------------
 
 export interface Keys { sig: CryptoKey; auth: CryptoKey }
-export interface Pairing { hostId: string; devId: string; secret: string }
+/** `lan`: the host's "ip:port" addresses (electron/lan.js), so a controller can pair and connect with no Internet. */
+export interface Pairing { hostId: string; devId: string; secret: string; lan?: string[] }
 
 export const CONTROLLER_URL = 'https://hienphuong99.github.io/ZeroPort/'
-export const pairingCode = (p: Pairing) => `v1.${p.hostId}.${p.devId}.${p.secret}`
+export const pairingCode = (p: Pairing) => `v1.${p.hostId}.${p.devId}.${p.secret}${p.lan?.length ? '@' + p.lan.join(',') : ''}`
 export const pairingLink = (p: Pairing) => `${CONTROLLER_URL}#p=${pairingCode(p)}`
 
 /** Accepts a bare code or any URL/text containing one. */
 export function parsePairing(text: string): Pairing | null {
-  const m = /v1\.([\w-]{22})\.([\w-]{11})\.([\w-]{43})/.exec(text)
-  return m ? { hostId: m[1], devId: m[2], secret: m[3] } : null
+  const m = /v1\.([\w-]{22})\.([\w-]{11})\.([\w-]{43})(?:@([\d.:,]+))?/.exec(text)
+  return m ? { hostId: m[1], devId: m[2], secret: m[3], ...(m[4] ? { lan: cleanAddrs(m[4].split(',')) } : {}) } : null
 }
+
+/** "ip:port" list as carried in pairing codes and host state; anything else is dropped. */
+export const cleanAddrs = (v: unknown): string[] =>
+  (Array.isArray(v) ? v : []).map(String).filter((a) => /^\d{1,3}(\.\d{1,3}){3}:\d{1,5}$/.test(a)).slice(0, 8)
 
 export async function deriveKeys(secret: string, hostId: string): Promise<Keys> {
   const base = await crypto.subtle.importKey('raw', unb64(secret), 'HKDF', false, ['deriveKey'])

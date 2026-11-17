@@ -124,7 +124,7 @@ async function save() { await zp.cfgSet(cfg); onChange() }
 
 /** Creates a slot for a new controller and returns what to show (QR/link/code). */
 export async function newPairing(name: string) {
-  const p = { hostId: cfg.hostId, devId: b64(rand(8)), secret: b64(rand(32)) }
+  const p = { hostId: cfg.hostId, devId: b64(rand(8)), secret: b64(rand(32)), lan: await zp.lanAddrs() }
   cfg.devices.push({ devId: p.devId, name, secret: p.secret, added: Date.now() })
   await save()
   return { code: pairingCode(p), link: pairingLink(p) }
@@ -311,7 +311,7 @@ async function admit(s: Session, file: RTCDataChannel) {
     onClose: (id) => zp.tcpHostDrop(s.sid, id),
   })
   await attachMedia(s)
-  tell(s, { t: 'state', name: cfg.name, platform: zp.platform, locked, ...privacy, macs: await zp.macs(), ...(await zp.displays()), ...(update ? { update } : {}) })
+  tell(s, { t: 'state', name: cfg.name, platform: zp.platform, locked, ...privacy, macs: await zp.macs(), lan: await zp.lanAddrs(), ...(await zp.displays()), ...(update ? { update } : {}) })
   syncSessions()
   void save()
 }

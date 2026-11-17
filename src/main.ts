@@ -42,7 +42,7 @@ async function addPairing(text: string) {
   const p = parsePairing(text)
   if (!p) return toast('Mã ghép cặp không hợp lệ')
   if (isHost && p.hostId === hostCfg().hostId) return toast('Đây là mã của chính máy này')
-  await saveHost({ hostId: p.hostId, devId: p.devId, name: 'Máy mới', keys: await deriveKeys(p.secret, p.hostId), added: Date.now() })
+  await saveHost({ hostId: p.hostId, devId: p.devId, name: 'Máy mới', keys: await deriveKeys(p.secret, p.hostId), added: Date.now(), lan: p.lan })
   toast('Đã thêm máy')
   await render()
 }
@@ -91,7 +91,9 @@ async function render() {
       ${cfg.log?.length ? `<details class="card" style="display:block"><summary>Lịch sử kết nối (${cfg.log.length})</summary>${cfg.log.map(logLine).join('')}</details>` : ''}` : ''}
 `
   for (const h of hosts) {
-    unwatch.push(link(h.hostId).onPresence((on) => {
+    const l = link(h.hostId)
+    l.lan(h.devId, h.lan)
+    unwatch.push(l.onPresence((on) => {
       const card = app.querySelector(`[data-host="${h.hostId}"]`)
       card?.querySelector('.dot')?.classList.toggle('on', on)
       const s = card?.querySelector('[data-status]')

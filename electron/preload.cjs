@@ -44,6 +44,9 @@ contextBridge.exposeInMainWorld('zp', {
   notify: (body) => ipcRenderer.send('notify', body),
   updateCheck: () => ipcRenderer.invoke('update:check'),
   updateInstall: () => ipcRenderer.invoke('update:install'),
+  lanSend: (env) => ipcRenderer.send('lan:send', env),
+  lanAddrs: () => ipcRenderer.invoke('lan:addrs'),
+  onLan: (fn) => ipcRenderer.on('lan', (_e, env) => fn(env)),
   autostartGet:() => ipcRenderer.invoke('autostart:get'),
   autostartSet: (on) => ipcRenderer.invoke('autostart:set', on),
 })

@@ -8,6 +8,10 @@ test('pairingCode round-trips through parsePairing', () => {
   const code = pairingCode(p)
   assert.deepEqual(parsePairing(`https://example.com/#p=${code}`), p)
   assert.equal(parsePairing('not-a-code'), null)
+  // LAN addresses ride along after '@'; junk entries are dropped, the code itself still parses
+  const lan = { ...p, lan: ['192.168.0.28:47800', '10.0.0.5:51234'] }
+  assert.deepEqual(parsePairing(pairingCode(lan)), lan)
+  assert.deepEqual(parsePairing(`${pairingCode(p)}@1.2.3:4,192.168.1.2:47800`)?.lan, ['192.168.1.2:47800'])
 })
 
 test('seal/open enforces AAD (direction, type, host, device)', async () => {

@@ -8,6 +8,7 @@ import os from 'node:os'
 import { inject } from './input.js'
 import * as sys from './system.js'
 import * as upd from './update.js'
+import * as lan from './lan.js'
 
 const dir = dirname(fileURLToPath(import.meta.url))
 const dev = process.argv.includes('--dev')
@@ -18,11 +19,15 @@ if (profile) app.setPath('userData', join(app.getPath('userData'), `profile-${pr
 
 let win, tray, quitting = false, selected = '', rect = null, awake = -1
 
+// Real LAN addresses in ICE candidates instead of mDNS names: with no Internet there is no STUN, and a phone may not
+// resolve .local names, so a plain host candidate is the only way the two can find each other.
+app.commandLine.appendSwitch('disable-features', 'WebRtcHideLocalIpsWithMdns')
+
 if (!app.requestSingleInstanceLock()) app.quit()
 else app.whenReady().then(start)
 
 app.on('second-instance', () => { win?.show(); win?.focus() })
-app.on('before-quit', () => { quitting = true; sys.privacy(false); sys.termCloseAll(); void sys.annotate({ close: true }); sys.tcpCloseAll() })
+app.on('before-quit', () => { quitting = true; lan.stop(); sys.privacy(false); sys.termCloseAll(); void sys.annotate({ close: true }); sys.tcpCloseAll() })
 app.on('window-all-closed', () => {}) // keep serving from the tray
 
 function start() {
@@ -80,6 +85,7 @@ function start() {
     }
   })
 
+  void lan.start((env) => win?.webContents.send('lan', env), () => false)
   powerSaveBlocker.start('prevent-app-suspension') // a sleeping host is an unreachable host
   screen.on('display-metrics-changed', () => { rect = null })
   screen.on('display-removed', () => { rect = null })
@@ -236,6 +242,10 @@ ipcMain.handle('update:install', guard(async () => {
   setTimeout(() => app.quit(), 1500) // let the renderer tell viewers first; the installer waits for us to exit
   return v
 }))
+
+// ---- LAN signaling (electron/lan.js) ----------------------------------------------------------
+ipcMain.on('lan:send', (e, env) => { if (mine(e)) lan.send(env) })
+ipcMain.handle('lan:addrs', guard(() => lan.addrs()))
 
 // ---- settings ---------------------------------------------------------------------------------
 // Only meaningful for the installed app: in development this would register electron.exe itself.
