@@ -45,3 +45,18 @@ test('makeTransfer aborts sink if receiver gets more bytes than header size', as
   await done
   assert.equal(closedOk, false)
 })
+
+test('makeTransfer discards a half-received file when the channel closes', async () => {
+  const [txCh, rxCh] = mockPair()
+  let onClose, closedOk = null
+  rxCh.addEventListener = (type, fn) => { if (type === 'close') onClose = fn }
+  const done = new Promise((res) => {
+    makeTransfer(rxCh, async () => ({ write: async () => {}, close: async (ok) => { closedOk = ok; res() } }), () => {})
+  })
+  txCh.send(JSON.stringify({ name: 'half.bin', size: 100 }))
+  txCh.send(new Uint8Array(10).buffer)
+  await new Promise((r) => setTimeout(r, 10))
+  onClose()
+  await done
+  assert.equal(closedOk, false)
+})
