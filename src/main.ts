@@ -15,13 +15,57 @@ function logLine(e: LogEntry) {
   const end = e.to === undefined ? 'đang kết nối' : e.to ? `${Math.max(1, Math.round((e.to - e.from) / 60_000))} phút` : 'không rõ lúc ngắt'
   return `<div class="sub">${when(e.from)} · <b style="color:var(--text)">${esc(e.dev)}</b> · ${end}</div>`
 }
+type ThemeMode = 'auto' | 'light' | 'dark'
+const THEME_KEY = 'zp_theme'
+const lightQuery = matchMedia('(prefers-color-scheme: light)')
+let themeMode: ThemeMode = (localStorage.getItem(THEME_KEY) as ThemeMode) || 'auto'
+if (!['auto', 'light', 'dark'].includes(themeMode)) themeMode = 'auto'
+const effectiveTheme = (): 'light' | 'dark' => (themeMode === 'auto' ? (lightQuery.matches ? 'light' : 'dark') : themeMode)
+function applyTheme(fade = false) {
+  const effective = effectiveTheme()
+  if (fade) {
+    document.documentElement.classList.add('theme-fade')
+    setTimeout(() => document.documentElement.classList.remove('theme-fade'), 260)
+  }
+  document.documentElement.dataset.theme = effective
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', effective === 'light' ? '#cfdcf2' : '#080d1a')
+}
+async function toggleTheme(e: MouseEvent, btn: HTMLElement) {
+  themeMode = effectiveTheme() === 'dark' ? 'light' : 'dark'
+  localStorage.setItem(THEME_KEY, themeMode)
+  const commit = () => {
+    applyTheme()
+    btn.setAttribute('aria-checked', String(effectiveTheme() === 'dark'))
+  }
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches
+  const startVT = (document as any).startViewTransition?.bind(document)
+  if (!startVT || reduce) { applyTheme(!reduce); btn.setAttribute('aria-checked', String(effectiveTheme() === 'dark')); return }
+  const r = btn.getBoundingClientRect()
+  const x = e.clientX > 0 ? e.clientX : r.left + r.width / 2
+  const y = e.clientY > 0 ? e.clientY : r.top + r.height / 2
+  const endR = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y))
+  const vt = startVT(commit)
+  try {
+    await vt.ready
+    document.documentElement.animate(
+      { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${endR}px at ${x}px ${y}px)`] },
+      { duration: 480, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', pseudoElement: '::view-transition-new(root)' },
+    )
+  } catch {}
+}
+lightQuery.addEventListener('change', () => { if (themeMode === 'auto') applyTheme() })
+applyTheme()
+
 let hosts: HostEntry[] = []
 let unwatch: (() => void)[] = []
 
 export function toast(msg: string) {
   const t = Object.assign(document.createElement('div'), { className: 'toast', textContent: msg })
   document.body.append(t)
-  setTimeout(() => t.remove(), 3500)
+  setTimeout(() => {
+    t.classList.add('out')
+    setTimeout(() => t.remove(), 220)
+  }, 3300)
 }
 
 /** In-page replacement for window.prompt, which Electron does not implement. */
@@ -55,7 +99,14 @@ async function render() {
   const upd = isHost ? updateInfo() : null
   const tv = isHost ? castInfo() : null
   app.innerHTML = `
-    <h1><img src="icon-192.png" alt="">ZeroPort</h1>
+    <div class="row" style="align-items:center;justify-content:space-between;gap:12px">
+      <h1><img src="icon-192.png" alt="">ZeroPort</h1>
+      <button type="button" data-act="theme" class="theme-pill" role="switch" aria-checked="${effectiveTheme() === 'dark'}" aria-label="Chuyển chế độ sáng tối" title="Đổi giao diện Sáng / Tối">
+        <span class="tp-stars" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="tp-clouds" aria-hidden="true"><i></i><i></i></span>
+        <span class="tp-knob" aria-hidden="true"><span class="tp-crater"></span></span>
+      </button>
+    </div>
     <div class="row" style="align-items:center;justify-content:space-between;margin:28px 0 10px">
       <h2 style="margin:0">Máy của tôi</h2>
       ${hosts.length >= 2 ? '<button data-act="wall" class="sm">Tường màn hình</button>' : ''}
@@ -138,6 +189,8 @@ app.addEventListener('click', async (e) => {
   } else if (act === 'tv') {
     if (castInfo()) await castStop().catch((err) => toast(`Không dừng được: ${err?.message ?? err}`))
     else await showTvs()
+  } else if (act === 'theme') {
+    void toggleTheme(e, btn)
   } else if (act === 'settings') await showSettings()
   else if (act === 'pair') {
     const name = await ask('Tên thiết bị sẽ điều khiển máy này', `Thiết bị ${hostCfg().devices.length + 1}`)
@@ -243,6 +296,8 @@ async function boot() {
   Object.assign(window, { zpHostStats: hostStats })
   if (isHost) await startHost(() => void render())
   await render()
+  app.classList.add('boot-in')
+  app.addEventListener('animationend', () => app.classList.remove('boot-in'), { once: true })
   // Pairing links carry the secret in the fragment: consume it, then scrub it from the address bar and history.
   if (location.hash.startsWith('#p=')) {
     const text = location.hash

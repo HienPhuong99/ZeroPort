@@ -10,6 +10,7 @@ const root = document.getElementById('session')!
 const coarse = matchMedia('(pointer: coarse)').matches
 /** No pointer at all: a TV driven by its remote (D-pad), where the toolbar must be reachable by focus. */
 const remoteOnly = matchMedia('(pointer: none)').matches
+const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches
 const zp = (window as any).zp
 const esc = (s: unknown) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 
@@ -115,6 +116,7 @@ export function openSession(host: HostEntry, onClose: () => void, qName = host.p
   function paintVeil() {
     const lockedNow = conn === 'connected' && hostLocked
     veil.hidden = conn === 'connected' && !hostLocked
+    veil.dataset.spin = (conn === 'connecting' || conn === 'offline') ? '1' : ''
     veilMsg.textContent = lockedNow
       ? 'Máy chủ đang ở màn hình khoá. Bản này chưa điều khiển được màn hình khoá — cần mở khoá tại máy.'
       : connDetail && conn !== 'otp' ? connDetail : { connecting: 'Đang kết nối…', offline: 'Máy chủ không phản hồi — đang thử lại…', connected: '', rejected: 'Bị từ chối', closed: '', otp: 'Chờ mã xác thực 2 lớp…' }[conn]
@@ -190,21 +192,29 @@ export function openSession(host: HostEntry, onClose: () => void, qName = host.p
   paintVeil()
 
   // ---- layout: video fitted to the stage, then zoom/pan (touch) ----------------------------------
-  let zoom = 1, panX = 0, panY = 0
+  let zoom = 1, panX = 0, panY = 0, stageW = 0, stageH = 0, baseW = 0, baseH = 0
   const cur = { x: 0.5, y: 0.5 } // remote cursor, 0..1 — trackpad mode moves this instead of pointing directly
-  function layout() {
-    const sw = stage.clientWidth, sh = stage.clientHeight, vw = video.videoWidth || 16, vh = video.videoHeight || 9
-    const k = Math.min(sw / vw, sh / vh), w = vw * k, h = vh * k
+  // Separate transform updates from sizing so pinch-zoom and trackpad follow stay strictly compositor-only.
+  function place() {
     zoom = Math.min(6, Math.max(1, zoom))
-    // Keep the picture covering the stage: centred when smaller, clamped to the edges when zoomed in.
     const fit = (pan: number, size: number, box: number) => (size * zoom <= box ? (box - size * zoom) / 2 : Math.min(0, Math.max(box - size * zoom, pan)))
-    panX = fit(panX, w, sw); panY = fit(panY, h, sh)
-    Object.assign(video.style, { width: `${w}px`, height: `${h}px`, transform: `translate(${panX}px,${panY}px) scale(${zoom})` })
-    Object.assign(anno.style, { width: `${w}px`, height: `${h}px`, transform: `translate(${panX}px,${panY}px) scale(${zoom})` })
-    if (anno.width !== Math.round(w * devicePixelRatio) || anno.height !== Math.round(h * devicePixelRatio)) {
-      anno.width = Math.max(1, Math.round(w * devicePixelRatio))
-      anno.height = Math.max(1, Math.round(h * devicePixelRatio))
+    panX = fit(panX, baseW, stageW); panY = fit(panY, baseH, stageH)
+    const xf = `translate3d(${panX}px,${panY}px,0) scale(${zoom})`
+    video.style.transform = xf
+    anno.style.transform = xf
+  }
+  function layout() {
+    stageW = stage.clientWidth; stageH = stage.clientHeight
+    const vw = video.videoWidth || 16, vh = video.videoHeight || 9
+    const k = Math.min(stageW / vw, stageH / vh)
+    baseW = vw * k; baseH = vh * k
+    Object.assign(video.style, { width: `${baseW}px`, height: `${baseH}px` })
+    Object.assign(anno.style, { width: `${baseW}px`, height: `${baseH}px` })
+    if (anno.width !== Math.round(baseW * devicePixelRatio) || anno.height !== Math.round(baseH * devicePixelRatio)) {
+      anno.width = Math.max(1, Math.round(baseW * devicePixelRatio))
+      anno.height = Math.max(1, Math.round(baseH * devicePixelRatio))
     }
+    place()
   }
   const norm = (e: { clientX: number; clientY: number }) => {
     const r = video.getBoundingClientRect()
@@ -212,10 +222,10 @@ export function openSession(host: HostEntry, onClose: () => void, qName = host.p
   }
   function follow() { // when zoomed in, scroll the picture so the remote cursor stays in view
     if (zoom === 1) return
-    const r = video.getBoundingClientRect(), cx = r.left + cur.x * r.width, cy = r.top + cur.y * r.height, m = 40
-    if (cx < m) panX += m - cx; else if (cx > stage.clientWidth - m) panX -= cx - (stage.clientWidth - m)
-    if (cy < m) panY += m - cy; else if (cy > stage.clientHeight - m) panY -= cy - (stage.clientHeight - m)
-    layout()
+    const cx = panX + cur.x * baseW * zoom, cy = panY + cur.y * baseH * zoom, m = 40
+    if (cx < m) panX += m - cx; else if (cx > stageW - m) panX -= cx - (stageW - m)
+    if (cy < m) panY += m - cy; else if (cy > stageH - m) panY -= cy - (stageH - m)
+    place()
   }
   video.addEventListener('resize', layout, sig)
   addEventListener('resize', layout, sig)
@@ -314,7 +324,7 @@ export function openSession(host: HostEntry, onClose: () => void, qName = host.p
         const z = Math.min(6, Math.max(1, zoom * (now.dist / two.dist)))
         // keep the point under the fingers fixed while scaling
         panX = now.cx - ((two.cx - panX) / zoom) * z; panY = now.cy - ((two.cy - panY) / zoom) * z
-        zoom = z; layout()
+        zoom = z; place()
       } else if (two.mode === 'scroll') remote.send({ t: 'mw', dx: (two.cx - now.cx) * 2.5, dy: (two.cy - now.cy) * 2.5 })
       if (two.mode) Object.assign(two, now)
     }
@@ -638,9 +648,13 @@ export function openSession(host: HostEntry, onClose: () => void, qName = host.p
   }
   function showMenu(kind: string) {
     if (!menu.hidden && menu.dataset.kind === kind) return hideMenu()
+    const switching = !menu.hidden
     menuFrom = document.activeElement as HTMLElement | null
     menu.dataset.kind = kind
     menu.hidden = false
+    if (switching && !reducedMotion()) {
+      menu.animate([{ opacity: 0.72, transform: 'translateX(-50%) scale(0.985)' }, { opacity: 1, transform: 'translateX(-50%) scale(1)' }], { duration: 150, easing: 'cubic-bezier(0.23, 1, 0.32, 1)' })
+    }
     if (remoteOnly) queueMicrotask(() => menu.querySelector<HTMLElement>('button')?.focus())
     if (kind === 'menu') {
       menu.innerHTML = `<div class="wide">Giữ phím bổ trợ cho phím kế tiếp</div>` +
@@ -703,7 +717,11 @@ export function openSession(host: HostEntry, onClose: () => void, qName = host.p
     const b = (e.target as HTMLElement).closest<HTMLElement>('button')
     if (!b) return
     const a = b.dataset.a
-    if (b.id === 'grip') { bar.classList.toggle('min'); menu.hidden = true }
+    if (b.id === 'grip') {
+      bar.classList.toggle('min')
+      menu.hidden = true
+      if (!reducedMotion()) bar.animate([{ transform: 'translateX(-50%) scale(0.97)' }, { transform: 'translateX(-50%) scale(1)' }], { duration: 160, easing: 'cubic-bezier(0.23, 1, 0.32, 1)' })
+    }
     else if (a === 'menu' || a === 'quality' || a === 'screen' || a === 'more') showMenu(a)
     else if (a === 'kb') document.activeElement === kb ? kb.blur() : focusKb()
     else if (a === 'touch') { trackpad = !trackpad; b.textContent = trackpad ? 'Trackpad' : 'Chạm' }
