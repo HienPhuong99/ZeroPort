@@ -1,7 +1,7 @@
 // Unit tests for src/files.ts: chunked transfer round-trip and overflow protection.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { makeTransfer } from '../src/files.ts'
+import { download, makeTransfer, openSink } from '../src/files.ts'
 
 function mockPair() {
   const mk = () => ({ readyState: 'open', bufferedAmount: 0, bufferedAmountLowThreshold: 0, binaryType: 'arraybuffer', onmessage: null, send: () => {}, addEventListener: () => {} })
@@ -59,4 +59,32 @@ test('makeTransfer discards a half-received file when the channel closes', async
   onClose()
   await done
   assert.equal(closedOk, false)
+})
+
+test('openSink and download stream through zpAndroid when present', async () => {
+  const saved = new Map()
+  let next = 1
+  globalThis.zpAndroid = {
+    saveOpen: (name, mime) => { const id = next++; saved.set(id, { name, mime, chunks: [], ok: null }); return id },
+    saveWrite: (id, b64) => { saved.get(id).chunks.push(Buffer.from(b64, 'base64')); return true },
+    saveClose: (id, ok) => { saved.get(id).ok = ok; return true },
+  }
+  try {
+    const sink = await openSink('photo.png')
+    await sink.write(new Uint8Array([1, 2, 3]).buffer)
+    await sink.close(true)
+    assert.equal(saved.get(1).name, 'photo.png')
+    assert.equal(saved.get(1).ok, true)
+    assert.deepEqual(Buffer.concat(saved.get(1).chunks), Buffer.from([1, 2, 3]))
+
+    const big = new Uint8Array(70_000)
+    big.fill(7)
+    await download(new Blob([big], { type: 'image/png' }), 'shot.png')
+    assert.equal(saved.get(2).name, 'shot.png')
+    assert.equal(saved.get(2).mime, 'image/png')
+    assert.equal(saved.get(2).ok, true)
+    assert.deepEqual(Buffer.concat(saved.get(2).chunks), Buffer.from(big))
+  } finally {
+    delete globalThis.zpAndroid
+  }
 })

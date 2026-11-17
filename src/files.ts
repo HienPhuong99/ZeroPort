@@ -54,22 +54,58 @@ export function makeTransfer(ch: RTCDataChannel, open: (name: string, size: numb
 }
 
 const zp = (globalThis as any).zp
+const zpAndroid = () => (globalThis as any).zpAndroid as {
+  saveOpen(name: string, mime: string): number
+  saveWrite(id: number, b64: string): boolean
+  saveClose(id: number, ok: boolean): boolean
+} | undefined
 
-/** Where received files go: straight to disk in the desktop app, otherwise memory then a browser download. */
+function toBase64(u: Uint8Array): string {
+  let s = ''
+  for (const b of u) s += String.fromCharCode(b)
+  return btoa(s)
+}
+
+/** Where received files go: straight to disk in desktop/Android apps, otherwise memory then a browser download. */
 export async function openSink(name: string): Promise<Sink> {
   if (zp) {
     const id = await zp.fileOpen(name)
     return { write: (c) => zp.fileWrite(id, c), close: (ok) => zp.fileClose(id, ok) }
   }
-  // ponytail: whole file held in memory in browsers (fine to ~1 GB on desktop, less on phones); the desktop app streams.
+  const android = zpAndroid()
+  if (android) {
+    const id = android.saveOpen(name, 'application/octet-stream')
+    if (id < 0) throw new Error('android saveOpen failed')
+    return {
+      write: async (c) => { if (!android.saveWrite(id, toBase64(new Uint8Array(c)))) throw new Error('android saveWrite failed') },
+      close: async (ok) => { android.saveClose(id, ok) },
+    }
+  }
+  // ponytail: whole file held in memory in browsers (fine to ~1 GB on desktop, less on phones); the desktop/Android apps stream.
   const parts: ArrayBuffer[] = []
   return {
     write: async (c) => void parts.push(c),
-    close: async (ok) => { if (ok) download(new Blob(parts), name) },
+    close: async (ok) => { if (ok) await download(new Blob(parts), name) },
   }
 }
 
-export function download(blob: Blob, name: string) {
+export async function download(blob: Blob, name: string) {
+  const android = zpAndroid()
+  if (android) {
+    const id = android.saveOpen(name, blob.type || 'application/octet-stream')
+    if (id < 0) throw new Error('android saveOpen failed')
+    let ok = false
+    try {
+      for (let o = 0; o < blob.size; o += 65_536) {
+        const chunk = new Uint8Array(await blob.slice(o, o + 65_536).arrayBuffer())
+        if (!android.saveWrite(id, toBase64(chunk))) throw new Error('android saveWrite failed')
+      }
+      ok = true
+    } finally {
+      android.saveClose(id, ok)
+    }
+    return
+  }
   const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name })
   a.click()
   setTimeout(() => URL.revokeObjectURL(a.href), 60_000)

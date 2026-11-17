@@ -103,7 +103,7 @@ Trên thẻ máy ở **Máy của tôi**:
   - *Lưu ý:* trên Windows, việc **chặn chuột/phím tại chỗ** (`BlockInput`) chỉ có hiệu lực nếu app ZeroPort trên host được chạy bằng quyền Administrator; tổ hợp `Ctrl+Alt+Del` luôn thoát chế độ chặn theo quy định bảo mật của Windows. Khi người điều khiển ngắt kết nối, màn hình đen tự tắt ngay.
 - **Khoá / nguồn…:** gửi lệnh `Khoá máy`, `Đăng xuất`, `Khởi động lại`, `Tắt máy` (có hộp thoại xác nhận cho các lệnh nguồn).
 - **Thông tin hệ thống:** xem CPU, RAM, uptime, danh sách 60 tiến trình tốn RAM nhất và nút **Dừng** tiến trình.
-- **Terminal:** mở dòng lệnh từ xa (`cmd.exe` trên Windows, shell trên macOS) kèm nút `^C` để ngắt lệnh. *(Dùng cho lệnh dòng; không hỗ trợ ứng dụng TUI toàn màn hình như `vim`.)*
+- **Terminal:** mở dòng lệnh từ xa (`cmd.exe` trên Windows, shell trên macOS) kèm nút **Mở lại** để ngắt lệnh đang kẹt và tạo shell mới. *(Dùng cho lệnh dòng; không hỗ trợ ứng dụng TUI toàn màn hình như `vim`.)*
 - **Chuột game (khoá con trỏ)** *(chỉ trên máy tính)*: dùng Pointer Lock gửi di chuyển chuột tương đối cho game/3D; bấm `Esc` để thoát.
 - **Đánh thức máy khác (Wake-on-LAN):** nhờ một máy host đang online gửi gói đánh thức (magic packet) tới máy khác trong cùng mạng LAN. ZeroPort tự lưu địa chỉ MAC của mỗi host sau lần kết nối đầu tiên; bạn cũng có thể nhập MAC thủ công.
 - **Bảng vẽ chú thích:** chọn màu và vẽ trực tiếp lên màn hình để chỉ dẫn cho người ngồi ở máy host (hiển thị bằng lớp phủ trong suốt, không làm bấm nhầm vào cửa sổ bên dưới); có nút **Xoá** và **Thoát vẽ**.

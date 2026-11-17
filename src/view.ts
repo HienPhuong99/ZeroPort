@@ -384,7 +384,7 @@ export function openSession(host: HostEntry, onClose: () => void, qName = host.p
   function screenshot() {
     const c = Object.assign(document.createElement('canvas'), { width: video.videoWidth, height: video.videoHeight })
     c.getContext('2d')!.drawImage(video, 0, 0)
-    c.toBlob((b) => b && download(b, `zeroport-${stamp()}.png`))
+    c.toBlob((b) => { if (b) void download(b, `zeroport-${stamp()}.png`).then(() => { if ((window as any).zpAndroid) say('Đã lưu ảnh vào Downloads/ZeroPort') }, () => say('Lưu ảnh thất bại')) })
   }
   let rec: MediaRecorder | null = null
   function toggleRec() {
@@ -393,7 +393,7 @@ export function openSession(host: HostEntry, onClose: () => void, qName = host.p
     // ponytail: recording is buffered in memory until stopped; write to disk in chunks if hours-long recordings matter.
     const r = (rec = new MediaRecorder(video.srcObject as MediaStream))
     r.ondataavailable = (e) => parts.push(e.data)
-    r.onstop = () => { download(new Blob(parts, { type: r.mimeType }), `zeroport-${stamp()}.${r.mimeType.includes('mp4') ? 'mp4' : 'webm'}`); say('Đã lưu bản ghi') }
+    r.onstop = () => void download(new Blob(parts, { type: r.mimeType }), `zeroport-${stamp()}.${r.mimeType.includes('mp4') ? 'mp4' : 'webm'}`).then(() => say('Đã lưu bản ghi'), () => say('Lưu bản ghi thất bại'))
     r.start(1000)
     say('● Đang ghi hình — vào Thêm → Dừng ghi để lưu')
   }
@@ -455,11 +455,16 @@ export function openSession(host: HostEntry, onClose: () => void, qName = host.p
       <pre id="term-out"></pre>
       <form id="term-in" class="row">
         <input type="text" name="cmd" placeholder="Nhập lệnh rồi Enter…" autocomplete="off" spellcheck="false">
-        <button class="primary">Gửi</button><button type="button" id="tbrk" title="Ctrl+C">^C</button><button type="button" id="tclose">Đóng</button>
+        <button class="primary">Gửi</button><button type="button" id="trestart" title="Dừng lệnh đang chạy và mở lại shell">Mở lại</button><button type="button" id="tclose">Đóng</button>
       </form>`
     const inp = panel.querySelector<HTMLInputElement>('input')!
     panel.querySelector('#tclose')!.addEventListener('click', () => panel.close())
-    panel.querySelector('#tbrk')!.addEventListener('click', () => { remote.send({ t: 'term', s: '\x03' }); inp.focus() })
+    panel.querySelector('#trestart')!.addEventListener('click', () => {
+      const pre = panel.querySelector<HTMLElement>('#term-out')
+      if (pre) pre.textContent += '\n[Đang mở lại shell…]\n'
+      remote.send({ t: 'term', open: true })
+      inp.focus()
+    })
     panel.querySelector('#term-in')!.addEventListener('submit', (e) => {
       e.preventDefault()
       const s = inp.value
