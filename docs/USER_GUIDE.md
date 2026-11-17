@@ -27,7 +27,7 @@ Tải bản cài đặt mới nhất tại: https://github.com/HienPhuong99/Zero
 Bạn có thể dùng bất kỳ thiết bị nào sau đây:
 - **Trình duyệt máy tính (Windows / macOS / Linux):** mở https://hienphuong99.github.io/ZeroPort/
 - **iPhone / iPad (iOS Safari):** mở https://hienphuong99.github.io/ZeroPort/ → bấm nút **Chia sẻ (Share)** → **Thêm vào Màn hình chính (Add to Home Screen)** để chạy toàn màn hình như app.
-- **Android:** tải và cài `ZeroPort-android.apk` (bật cho phép cài từ nguồn không xác định nếu Android hỏi), hoặc dùng Chrome mở link web trên.
+- **Android:** tải và cài `ZeroPort-android.apk` (bật cho phép cài từ nguồn không xác định nếu Android hỏi), hoặc dùng Chrome mở link web trên. Từ bản `v0.2.2` APK được ký bằng một khoá cố định nên cài đè lên bản cũ được; riêng lần đầu chuyển từ `v0.2.0`/`v0.2.1` phải gỡ bản cũ trước (và ghép cặp lại).
 - **App desktop Electron:** chính app ZeroPort trên Windows/macOS vừa làm host vừa làm controller để điều khiển máy khác.
 
 ---

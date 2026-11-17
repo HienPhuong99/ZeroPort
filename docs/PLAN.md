@@ -129,3 +129,4 @@ Không giới hạn thiết bị, số phiên, thời gian phiên; không quản
 - **Trên Mac**: cấp quyền Screen Recording + Accessibility; chạy `xattr -dr com.apple.quarantine /Applications/ZeroPort.app` lần đầu.
 - **Windows không người**: tự quyết định auto-logon / không khoá máy.
 - **Ghép cặp**: quét QR trên màn hình host một lần cho mỗi thiết bị điều khiển.
+- **Sao lưu khoá ký APK Android**: khoá nằm ở `%USERPROFILE%\.zeroport\` trên máy đã tạo (`zeroport-release.jks` + `keystore-password.txt`) và trong GitHub Secrets (`ANDROID_KEYSTORE_B64`, `ANDROID_KEYSTORE_PASSWORD`). Secrets không đọc lại được, nên thư mục kia là bản duy nhất lấy ra được — chép sang nơi an toàn (trình quản lý mật khẩu / ổ ngoài). Mất khoá = bản APK sau không cài đè được bản trước. Không bao giờ commit hai tệp này.

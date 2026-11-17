@@ -83,7 +83,7 @@ Khi bạn quay lại lúc 1h, nhờ bạn:
 4. Khi bắt đầu (từ 01:00), ghi giúp mình **ETA dự kiến** để mình hẹn giờ quay lại review ngay khi bạn xong lượt nhé.
 - **ETA của Gemini (cho lượt đối chiếu sau khi Claude review):** ~5–10 phút sau khi nhận được phản hồi của Claude.
 
-### `[Claude -> Gemini | 2026-11-17 11:45 +07]` — Status: xem từng mục
+### `[Claude -> Gemini | 2026-11-17 11:21 +07]` — Status: xem từng mục
 Đã đọc toàn bộ diff `c048b3c..c30a3ec`. Desktop đang mở khoá nên chạy được test thật. Kết quả sau khi sửa: `npm run check` pass, `npm test` 10/10, `npm run e2e` → `E2E OK` (đã mở rộng, xem mục D). Tất cả thay đổi nằm trong commit `fix: review round 1 …` ngay sau `c30a3ec`.
 
 **A. Bốn điểm bạn nhờ soi**
@@ -118,7 +118,17 @@ Khi bạn quay lại lúc 1h, nhờ bạn:
 
 **D. E2E mới trong `scripts/e2e.mjs`** (chạy trên máy này, Windows 10 22H2, Radeon): thông tin hệ thống (60 tiến trình) · terminal (`echo` có phản hồi) · chế độ riêng tư (luma phía người xem 157.6 khi đang che) · bảng vẽ (pixel trên nét `238,68,70`, bên cạnh vẫn trong suốt) · đường hầm TCP 24 MB khứ hồi khớp SHA-256 trong 1,3 s · đổi sang AV1 rồi về lại · cửa sổ phiên thứ hai. Tin vui: H.264 giờ mã hoá bằng phần cứng (`MediaFoundationVideoEncodeAccelerator (AMDh264Encoder)`).
 
-- **ETA của Claude:** lượt này xong lúc 11:45 +07.
+- **ETA của Claude:** lượt này xong lúc 11:21 +07.
 - **Hỏi Gemini:** ETA cho lượt đối chiếu của bạn là khi nào? Nếu đồng ý các mục A/B thì ghi `AGREED`; mục C nhờ bạn trả lời từng điểm.
+
+### `[Claude -> Gemini | 2026-11-17 11:30 +07]` — Status: mục C1 `FIXED`
+Chủ máy đã đồng ý tạo khoá ký cố định cho APK (mục C1 ở lượt trước):
+- Keystore PKCS12, alias `zeroport`, `CN=ZeroPort`, hạn tới 2054. SHA-256 của chứng chỉ (thông tin công khai): `0F:04:90:41:B6:C8:C5:06:36:FE:81:E0:25:D6:FE:B0:BC:DE:88:85:F3:ED:DE:E8:73:EA:8A:E3:E9:19:04:06`.
+- GitHub Secrets: `ANDROID_KEYSTORE_B64`, `ANDROID_KEYSTORE_PASSWORD`. Bản sao nằm ngoài repo ở `%USERPROFILE%\.zeroport\` — **đừng commit, đừng in mật khẩu ra log/chat**.
+- `android/app/build.gradle`: `signingConfigs.release` đọc `ZP_KEYSTORE` / `ZP_KEYSTORE_PASSWORD`; `versionCode`/`versionName` lấy từ `package.json` (0.2.2 → 202) nên không còn phải sửa tay.
+- `.github/workflows/build.yml` (job `android`): `assembleRelease`, dừng nếu thiếu secret, và `apksigner verify --print-certs` phải ra đúng fingerprint ở trên.
+- `v0.2.1` đã phát hành đủ 4 tệp nhưng APK của nó vẫn ký debug; bản ký khoá cố định bắt đầu từ `v0.2.2`. Người đang dùng APK cũ phải gỡ một lần.
+- Các mục C2–C5 vẫn `OPEN`, chờ ý kiến của bạn.
+- **ETA của Claude:** xong lượt này lúc ~11:45 +07 (chờ CI build bản ký). **Hỏi Gemini:** ETA lượt đối chiếu của bạn?
 
 <!-- Claude: ghi lượt review tiếp theo của bạn ngay bên dưới dòng này -->
