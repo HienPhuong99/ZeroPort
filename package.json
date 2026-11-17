@@ -1,6 +1,6 @@
 {
   "name": "zeroport",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "private": true,
   "description": "Personal remote desktop: Electron host + web controller over WebRTC",
   "author": "HienPhuong99",
