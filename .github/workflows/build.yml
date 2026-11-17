@@ -49,8 +49,22 @@ jobs:
         with: { distribution: temurin, java-version: '21' }
       - run: npm ci --ignore-scripts
       - run: npx vite build && npx cap sync android
-      - run: cd android && chmod +x gradlew && ./gradlew assembleDebug
-      - run: mkdir -p release && cp android/app/build/outputs/apk/debug/app-debug.apk release/ZeroPort-android.apk
+      # The same key for every release, otherwise Android refuses to install a new version over the old one.
+      - name: Signing key
+        env: { KS: '${{ secrets.ANDROID_KEYSTORE_B64 }}' }
+        run: |
+          test -n "$KS" || { echo "::error::secret ANDROID_KEYSTORE_B64 is missing"; exit 1; }
+          echo "$KS" | base64 -d > "$RUNNER_TEMP/zeroport.jks"
+      - run: cd android && chmod +x gradlew && ./gradlew assembleRelease
+        env:
+          ZP_KEYSTORE: ${{ runner.temp }}/zeroport.jks
+          ZP_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      - run: mkdir -p release && cp android/app/build/outputs/apk/release/app-release.apk release/ZeroPort-android.apk
+      - name: Check the signature (certificate SHA-256 is public; a different one means the wrong key)
+        run: |
+          apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$apksigner" verify --print-certs release/ZeroPort-android.apk | tee certs.txt
+          grep -qi '0f049041b6c8c50636fe81e025d6feb0bcde8885f3eddee873ea8ae3e9190406' certs.txt
       - uses: actions/upload-artifact@v4
         with:
           name: zeroport-android

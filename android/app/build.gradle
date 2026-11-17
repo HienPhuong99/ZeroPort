@@ -1,5 +1,12 @@
 apply plugin: 'com.android.application'
 
+// One version for every platform: package.json. 0.2.2 -> versionCode 202, so each release installs over the last.
+def pkgVersion = new groovy.json.JsonSlurper().parse(file('../../package.json')).version
+def (vMajor, vMinor, vPatch) = pkgVersion.tokenize('.-').take(3).collect { it as int }
+// Release signing key: CI decodes it from GitHub Secrets (see .github/workflows/build.yml). It must stay the same
+// for the life of the app — Android refuses to update an app signed with a different key.
+def keystorePath = System.getenv('ZP_KEYSTORE')
+
 android {
     namespace = "io.github.hienphuong99.zeroport"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +14,8 @@ android {
         applicationId "io.github.hienphuong99.zeroport"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2
-        versionName "0.2.0"
+        versionCode vMajor * 10000 + vMinor * 100 + vPatch
+        versionName pkgVersion
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,8 +23,20 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (keystorePath) {
+                storeFile file(keystorePath)
+                storePassword System.getenv('ZP_KEYSTORE_PASSWORD')
+                keyAlias 'zeroport'
+                keyPassword System.getenv('ZP_KEYSTORE_PASSWORD')
+            }
+        }
+    }
     buildTypes {
         release {
+            // Without the key (forks, local builds) the release APK is left unsigned rather than signed with a throwaway key.
+            if (keystorePath) signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
