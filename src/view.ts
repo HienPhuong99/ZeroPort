@@ -66,7 +66,7 @@ export function openSession(host: HostEntry, onClose: () => void, qName = host.p
     <div id="bar">
       <button id="grip" class="icon" title="Thu gọn" aria-label="Thu gọn">${I.menu}</button>
       <button data-a="menu">Phím</button>
-      ${coarse ? '<button data-a="kb" class="icon" title="Bàn phím" aria-label="Bàn phím">${I.keyboard}</button><button data-a="touch">Trackpad</button>' : ''}
+      ${coarse ? `<button data-a="kb" class="icon" title="Bàn phím" aria-label="Bàn phím">${I.keyboard}</button><button data-a="touch">Trackpad</button>` : ''}
       <button data-a="screen" hidden>Màn hình</button>
       <button data-a="quality">Chất lượng</button>
       <button data-a="more">Thêm</button>
