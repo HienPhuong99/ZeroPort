@@ -16,7 +16,7 @@ export function openWall(hosts: HostEntry[], onPick: (h: HostEntry) => void, onC
       ${hosts.map((h, i) => `
         <div class="wtile" data-i="${i}" tabindex="0" role="button">
           <video autoplay playsinline muted disablepictureinpicture></video>
-          <div class="wcap"><span class="wname">${esc(h.name)}</span><span class="wstat">Đang kết nối…</span></div>
+          <div class="wcap"><span class="dot wait"></span><span class="wname">${esc(h.name)}</span><span class="wstat">Đang kết nối…</span></div>
         </div>`).join('')}
     </div>`
 
@@ -24,9 +24,11 @@ export function openWall(hosts: HostEntry[], onPick: (h: HostEntry) => void, onC
     const tile = root.querySelector<HTMLElement>(`.wtile[data-i="${i}"]`)!
     const video = tile.querySelector('video')!
     const stat = tile.querySelector('.wstat')!
+    const dot = tile.querySelector('.dot')!
     const r = connect(h, {
       state(s, detail) {
         stat.textContent = detail || { connecting: 'Đang kết nối…', connected: 'Trực tuyến', offline: 'Ngoại tuyến', rejected: 'Bị từ chối', closed: 'Đã đóng', otp: 'Cần mã 2FA — bấm để mở' }[s]
+        dot.className = `dot ${s === 'connected' ? 'on' : s === 'connecting' ? 'wait' : ''}`
         if (s === 'connected') r.send({ t: 'quality', kbps: 1200, fps: 15, scale: 2, smooth: true })
       },
       stream(ms) { if (video.srcObject !== ms) video.srcObject = ms; void video.play().catch(() => {}) },

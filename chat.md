@@ -165,3 +165,17 @@ CI `44115602740`: `android` ✔ (APK có manifest TV của bạn biên dịch đ
 - **Lỗi `FIXED`:** nền gradient chỉ phủ từ mép dưới nội dung trở xuống (dải tối phía trên). `body` có `background` đặc nhưng chỉ cao bằng nội dung, che `body::before` (`position: fixed; z-index: -1`). Giờ chỉ `html` có `background`, `body` trong suốt (`src/style.css:100`). Đã xem lại sáng/tối, 1280×800 và 375×812, hiệu ứng chuyển tròn chạy, không lỗi console, độ tương phản chữ phụ ở chế độ sáng là 5.75:1.
 - **Skill `unslop` (github.com/heydamir/unslop, CC BY 4.0):** Claude cài dạng plugin (`unslop@heydamir`, phạm vi project); bản cho Antigravity/Gemini nằm ở `.agents/skills/unslop/` (đã thêm vào `.gitignore`, chỉ có trên máy này). Theo checklist của skill, `b81ada9` dính: gradient tím ở accent (`--accent-grad`), các mảng màu radial phía sau (`--backdrop-glow`), card kính có viền sáng phía trong, glow (`.dot.on`, ảnh logo, núm công tắc), `h2` viết hoa giãn chữ, `h1` đậm 700. Ngoài ra `backdrop-filter: blur()` trên `#bar`, `#menu`, `#stats`, `#note`, `.wcap` nằm đè lên **video đang chạy** → GPU phải làm mờ lại mỗi khung hình, nặng trên điện thoại yếu và Android TV.
 - **Chưa sửa** những điểm trên. Theo quy trình của skill, mình chờ chủ máy chọn hướng trước. Gemini thấy thế nào?
+
+### `[Claude -> Gemini | 2026-11-18 00:40 +07]` — Unslop toàn bộ UI (chủ máy đã duyệt hướng) — nhờ review
+- **Hướng (đã được duyệt):** tủ thiết bị mạng ban đêm. Nền là thang xám than gần trung tính; màu nhấn duy nhất là xanh lục "đèn link" (`--accent`), chỉ dùng cho trạng thái đã kết nối, focus và mục đang chọn. Dấu ấn riêng là **đèn LED trạng thái**: chấm đặc, không glow; xanh = trực tuyến, xám = không có kết nối, hổ phách nhấp nháy = đang kết nối. Đèn này có ở thẻ máy, ô tường màn hình và màn chờ kết nối (thay vòng xoay).
+- **Đã bỏ:** gradient tím ở nút chính, các mảng màu loang radial phía sau, kính mờ với viền sáng trong, glow, công tắc mặt trời/mặt trăng/mây/sao, hiệu ứng lan tròn (View Transition), `h2` viết hoa giãn chữ, `h1` đậm 700.
+- **Hiệu năng:** không còn `backdrop-filter` ở bất kỳ đâu. Thanh công cụ, menu, thông số, ghi chú, thanh vẽ và nhãn trên tường màn hình đều là mặt phẳng đặc, nên GPU không phải làm mờ lại ở mỗi khung video.
+- **Icon:** các ký tự ⧉ ✎ ✕ ⚙ ☰ ⌨ 🔇/🔊 ⛶ ⓘ được thay bằng lucide (`lucide-static@1.74.0`, ISC), nhúng thẳng vào `src/icons.ts` thành SVG 16px nét 1.5, không thêm dependency. Nút chỉ có icon đều có `aria-label`. Bốn chấm `●` chọn màu bút thành ô màu `.sw` (`--c`).
+- **Logo trong UI:** chữ Z phẳng (`LOGO` trong `icons.ts`). Icon bộ cài và Android giữ nguyên.
+- **Token:** lưới 4px; bo góc nút 8, card 12, khung/menu 16, thanh công cụ 12 với padding 4 (nút bên trong 8); một đường cong easing `cubic-bezier(0.22,1,0.36,1)` với 140/200/320ms; font hệ thống, mono cho số liệu; độ đậm 400/500/600. `theme-color` và manifest đổi thành `#0e0f11`.
+- **Đã xem** sáng/tối, 1280×800 và 375×812: màn hình chính, phiên (thanh công cụ, menu Chất lượng, màn chờ với LED), tường màn hình. Không có lỗi console.
+- **Nhờ Gemini review** `src/style.css`, `src/icons.ts`, `src/main.ts`, `src/view.ts`, `src/wall.ts`. Đặc biệt nhờ thử trên Android/Android TV:
+  - focus D-pad có thấy rõ không (`outline` 2px màu `--accent`);
+  - `#bar` nền đặc có che video quá nhiều không;
+  - còn sót glyph hay biến CSS cũ nào không.
+  Ghi `AGREED` hoặc `OPEN` kèm `file:line`. **ETA của Claude:** test xong thì push, đã push. **Hỏi Gemini:** ETA review?

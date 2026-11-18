@@ -7,13 +7,14 @@ import { listHosts, removeHost, saveHost, type HostEntry } from './store'
 import { activeSessions, castInfo, castStop, castTo, findTvs, hostCfg, hostStats, installUpdate, isHost, newPairing, revoke, startHost, totpBegin, totpDisable, totpEnable, updateInfo, updateSettings, type LogEntry } from './host'
 import { openSession } from './view'
 import { openWall } from './wall'
+import { I, LOGO } from './icons'
 
 const app = document.getElementById('app')!
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 const when = (t: number) => new Date(t).toLocaleString('vi-VN')
 function logLine(e: LogEntry) {
   const end = e.to === undefined ? 'đang kết nối' : e.to ? `${Math.max(1, Math.round((e.to - e.from) / 60_000))} phút` : 'không rõ lúc ngắt'
-  return `<div class="sub">${when(e.from)} · <b style="color:var(--text)">${esc(e.dev)}</b> · ${end}</div>`
+  return `<div class="sub">${when(e.from)} · <b>${esc(e.dev)}</b> · ${end}</div>`
 }
 type ThemeMode = 'auto' | 'light' | 'dark'
 const THEME_KEY = 'zp_theme'
@@ -25,33 +26,17 @@ function applyTheme(fade = false) {
   const effective = effectiveTheme()
   if (fade) {
     document.documentElement.classList.add('theme-fade')
-    setTimeout(() => document.documentElement.classList.remove('theme-fade'), 260)
+    setTimeout(() => document.documentElement.classList.remove('theme-fade'), 200)
   }
   document.documentElement.dataset.theme = effective
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', effective === 'light' ? '#cfdcf2' : '#080d1a')
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', effective === 'light' ? '#f5f6f7' : '#0e0f11')
 }
-async function toggleTheme(e: MouseEvent, btn: HTMLElement) {
+function toggleTheme(btn: HTMLElement) {
   themeMode = effectiveTheme() === 'dark' ? 'light' : 'dark'
   localStorage.setItem(THEME_KEY, themeMode)
-  const commit = () => {
-    applyTheme()
-    btn.setAttribute('aria-checked', String(effectiveTheme() === 'dark'))
-  }
-  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches
-  const startVT = (document as any).startViewTransition?.bind(document)
-  if (!startVT || reduce) { applyTheme(!reduce); btn.setAttribute('aria-checked', String(effectiveTheme() === 'dark')); return }
-  const r = btn.getBoundingClientRect()
-  const x = e.clientX > 0 ? e.clientX : r.left + r.width / 2
-  const y = e.clientY > 0 ? e.clientY : r.top + r.height / 2
-  const endR = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y))
-  const vt = startVT(commit)
-  try {
-    await vt.ready
-    document.documentElement.animate(
-      { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${endR}px at ${x}px ${y}px)`] },
-      { duration: 480, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', pseudoElement: '::view-transition-new(root)' },
-    )
-  } catch {}
+  applyTheme(!matchMedia('(prefers-reduced-motion: reduce)').matches)
+  btn.setAttribute('aria-checked', String(effectiveTheme() === 'dark'))
+  btn.innerHTML = effectiveTheme() === 'dark' ? I.moon : I.sun
 }
 lightQuery.addEventListener('change', () => { if (themeMode === 'auto') applyTheme() })
 applyTheme()
@@ -99,26 +84,22 @@ async function render() {
   const upd = isHost ? updateInfo() : null
   const tv = isHost ? castInfo() : null
   app.innerHTML = `
-    <div class="row" style="align-items:center;justify-content:space-between;gap:12px">
-      <h1><img src="icon-192.png" alt="">ZeroPort</h1>
-      <button type="button" data-act="theme" class="theme-pill" role="switch" aria-checked="${effectiveTheme() === 'dark'}" aria-label="Chuyển chế độ sáng tối" title="Đổi giao diện Sáng / Tối">
-        <span class="tp-stars" aria-hidden="true"><i></i><i></i><i></i></span>
-        <span class="tp-clouds" aria-hidden="true"><i></i><i></i></span>
-        <span class="tp-knob" aria-hidden="true"><span class="tp-crater"></span></span>
-      </button>
-    </div>
-    <div class="row" style="align-items:center;justify-content:space-between;margin:28px 0 10px">
+    <header class="top">
+      <h1>${LOGO}ZeroPort</h1>
+      <button type="button" data-act="theme" class="icon" role="switch" aria-checked="${effectiveTheme() === 'dark'}" aria-label="Giao diện tối" title="Đổi giao diện sáng / tối">${effectiveTheme() === 'dark' ? I.moon : I.sun}</button>
+    </header>
+    <div class="head">
       <h2 style="margin:0">Máy của tôi</h2>
       ${hosts.length >= 2 ? '<button data-act="wall" class="sm">Tường màn hình</button>' : ''}
     </div>
     ${hosts.map((h) => `
       <div class="card" data-host="${h.hostId}">
-        <span class="dot"></span>
+        <span class="dot wait"></span>
         <div class="grow"><div class="name">${esc(h.name)}</div><div class="sub" data-status>Đang kiểm tra…</div></div>
         <button class="primary" data-act="connect">Kết nối</button>
-        <button data-act="pop" title="Mở ở cửa sổ/tab mới">⧉</button>
-        <button data-act="rename" title="Đổi tên">✎</button>
-        <button class="danger" data-act="remove" title="Xoá">✕</button>
+        <button class="icon" data-act="pop" title="Mở ở cửa sổ/tab mới" aria-label="Mở ở cửa sổ mới">${I.open}</button>
+        <button class="icon" data-act="rename" title="Đổi tên" aria-label="Đổi tên">${I.pencil}</button>
+        <button class="icon danger" data-act="remove" title="Xoá" aria-label="Xoá">${I.x}</button>
       </div>`).join('') || `<div class="empty">Chưa có máy nào. Mở ZeroPort trên máy cần điều khiển, bấm “Ghép thiết bị mới”, rồi quét QR hoặc dán mã vào đây.</div>`}
     <form class="row" id="add">
       <input type="text" name="code" placeholder="Dán mã hoặc link ghép cặp" autocomplete="off" spellcheck="false">
@@ -132,7 +113,7 @@ async function render() {
           <div class="sub">${busy.length ? `Đang được điều khiển bởi ${esc(busy.join(', '))}` : 'Sẵn sàng nhận kết nối'}${tv ? ` · đang chiếu lên ${esc(tv.name)}` : ''}${upd ? ` · bản ${esc(upd.current)}` : ''}</div></div>
         ${upd?.available ? `<button data-act="update" title="Có bản mới trên GitHub">Cập nhật ${esc(upd.latest)}</button>` : ''}
         <button data-act="tv" title="Chiếu màn hình này lên Smart TV (DLNA) trong cùng mạng">${tv ? 'Dừng chiếu TV' : 'Chiếu lên TV'}</button>
-        <button data-act="settings" title="Cài đặt">⚙</button>
+        <button class="icon" data-act="settings" title="Cài đặt" aria-label="Cài đặt">${I.settings}</button>
         <button class="primary" data-act="pair">Ghép thiết bị mới</button>
       </div>
       ${cfg.devices.map((d) => `
@@ -148,7 +129,9 @@ async function render() {
     l.lan(h.devId, h.lan)
     unwatch.push(l.onPresence((on) => {
       const card = app.querySelector(`[data-host="${h.hostId}"]`)
-      card?.querySelector('.dot')?.classList.toggle('on', on)
+      const dot = card?.querySelector('.dot')
+      dot?.classList.remove('wait')
+      dot?.classList.toggle('on', on)
       const s = card?.querySelector('[data-status]')
       if (s) s.textContent = on ? 'Trực tuyến' : 'Ngoại tuyến'
     }))
@@ -190,7 +173,7 @@ app.addEventListener('click', async (e) => {
     if (castInfo()) await castStop().catch((err) => toast(`Không dừng được: ${err?.message ?? err}`))
     else await showTvs()
   } else if (act === 'theme') {
-    void toggleTheme(e, btn)
+    toggleTheme(btn)
   } else if (act === 'settings') await showSettings()
   else if (act === 'pair') {
     const name = await ask('Tên thiết bị sẽ điều khiển máy này', `Thiết bị ${hostCfg().devices.length + 1}`)
@@ -206,7 +189,7 @@ async function showSettings() {
     <label class="check"><input type="checkbox" name="auto" ${(await zp.autostartGet()) ? 'checked' : ''}> Tự chạy khi đăng nhập (ẩn ở khay hệ thống)</label>
     <label class="check"><input type="checkbox" name="lock" ${cfg.lockOnEnd ? 'checked' : ''}> Khoá máy khi người cuối cùng ngắt kết nối</label>
     <div class="row" style="align-items:center;justify-content:space-between;margin:12px 0">
-      <span class="sub">Xác thực 2 lớp (TOTP): <b style="color:var(--text)">${cfg.totp ? 'Đang bật' : 'Đang tắt'}</b></span>
+      <span class="sub">Xác thực 2 lớp (TOTP): <b>${cfg.totp ? 'Đang bật' : 'Đang tắt'}</b></span>
       <button type="button" id="totp" class="${cfg.totp ? 'danger' : ''}">${cfg.totp ? 'Tắt 2FA' : 'Bật 2FA…'}</button>
     </div>
     <label>Máy chủ TURN/STUN — JSON, để trống dùng mặc định. Chỉ cần khi mạng không nối trực tiếp được.

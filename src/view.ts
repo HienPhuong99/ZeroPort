@@ -5,6 +5,7 @@ import { makeTunnel } from './tunnel'
 import { listHosts, saveHost, type HostEntry } from './store'
 import { CLIP_MAX, cleanAddrs, type Ctl } from './proto'
 import { link } from './signal'
+import { I } from './icons'
 
 const root = document.getElementById('session')!
 const coarse = matchMedia('(pointer: coarse)').matches
@@ -54,24 +55,24 @@ export function openSession(host: HostEntry, onClose: () => void, qName = host.p
   root.innerHTML = `
     <div id="stage"><video autoplay playsinline muted disablepictureinpicture></video><canvas id="anno" hidden></canvas></div>
     <div id="anno-bar" hidden>
-      <button data-c="#ef4444" class="on" style="color:#ef4444">●</button>
-      <button data-c="#3b82f6" style="color:#3b82f6">●</button>
-      <button data-c="#22c55e" style="color:#22c55e">●</button>
-      <button data-c="#facc15" style="color:#facc15">●</button>
+      <button data-c="#ef4444" class="sw on" style="--c:#ef4444" aria-label="Bút đỏ"></button>
+      <button data-c="#3b82f6" class="sw" style="--c:#3b82f6" aria-label="Bút xanh dương"></button>
+      <button data-c="#22c55e" class="sw" style="--c:#22c55e" aria-label="Bút xanh lá"></button>
+      <button data-c="#facc15" class="sw" style="--c:#facc15" aria-label="Bút vàng"></button>
       <button id="anno-clr">Xoá</button>
       <button id="anno-exit" class="danger">Thoát vẽ</button>
     </div>
     <div id="veil"><div><strong></strong><div id="veil-msg"></div></div></div>
     <div id="bar">
-      <button id="grip" title="Thu gọn">☰</button>
+      <button id="grip" class="icon" title="Thu gọn" aria-label="Thu gọn">${I.menu}</button>
       <button data-a="menu">Phím</button>
-      ${coarse ? '<button data-a="kb">⌨</button><button data-a="touch">Trackpad</button>' : ''}
+      ${coarse ? '<button data-a="kb" class="icon" title="Bàn phím" aria-label="Bàn phím">${I.keyboard}</button><button data-a="touch">Trackpad</button>' : ''}
       <button data-a="screen" hidden>Màn hình</button>
       <button data-a="quality">Chất lượng</button>
       <button data-a="more">Thêm</button>
-      <button data-a="sound">🔇</button>
-      <button data-a="full">⛶</button>
-      <button data-a="stats">ⓘ</button>
+      <button data-a="sound" class="icon" title="Âm thanh" aria-label="Âm thanh">${I.muted}</button>
+      <button data-a="full" class="icon" title="Toàn màn hình" aria-label="Toàn màn hình">${I.full}</button>
+      <button data-a="stats" class="icon" title="Thông số kết nối" aria-label="Thông số kết nối">${I.info}</button>
       <button data-a="close" class="danger">Ngắt</button>
     </div>
     <div id="menu" hidden></div>
@@ -725,7 +726,7 @@ export function openSession(host: HostEntry, onClose: () => void, qName = host.p
     else if (a === 'menu' || a === 'quality' || a === 'screen' || a === 'more') showMenu(a)
     else if (a === 'kb') document.activeElement === kb ? kb.blur() : focusKb()
     else if (a === 'touch') { trackpad = !trackpad; b.textContent = trackpad ? 'Trackpad' : 'Chạm' }
-    else if (a === 'sound') { video.muted = !video.muted; b.textContent = video.muted ? '🔇' : '🔊' }
+    else if (a === 'sound') { video.muted = !video.muted; b.innerHTML = video.muted ? I.muted : I.sound }
     else if (a === 'stats') stats.hidden = !stats.hidden
     else if (a === 'full') void toggleFull()
     else if (a === 'close') close()
