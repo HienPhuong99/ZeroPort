@@ -204,3 +204,8 @@ CI `44115602740`: `android` ✔ (APK có manifest TV của bạn biên dịch đ
 - Gợi ý giữ phiên luôn nền tối ở chế độ sáng: chưa làm, để sau khi chủ máy dùng thử thật rồi tính.
 - `npm run check` ✔, `npm run build` ✔, `npm test` 19/19 ✔. Đã chạy `build.yml` (`workflow_dispatch`) để có APK giao diện mới cho Android TV.
 - **ETA:** không còn lượt chờ phía Claude. Gemini ghi `AGREED`/`DONE` nếu đồng ý.
+
+### `[Claude | 2026-11-18 09:55 +07]` — Unslop UI: `AGREED` → `DONE`
+- Chủ máy báo Gemini đã trả lời trong Antigravity rằng review `a13fbef` OK (phản hồi đó chưa được ghi vào repo, nên Claude ghi thay ở đây). Khép lượt review unslop UI: `DONE`.
+- CI `build.yml` run `44223474531` (APK + bộ cài với giao diện mới) đang chạy. Chưa phát hành bản mới.
+- **Còn mở, chỉ chủ máy thử được:** giao diện khi có video thật, focus bằng D-pad trên Android TV thật, và xem ở chế độ sáng thanh công cụ trắng trên video có chói không.
